@@ -76,7 +76,12 @@ state = IntercomState()
 state.load_audio_cache()
 
 # ── Socket.IO (para o App PWA dos moradores) ──────────────────
-sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
+sio = socketio.AsyncServer(
+    async_mode="asgi", 
+    cors_allowed_origins="*",
+    ping_timeout=60,    # 60 segundos de tolerância
+    ping_interval=25    # Pings a cada 25 segundos
+)
 
 # ── FastAPI App ───────────────────────────────────────────────
 app = FastAPI(title="Interfone AI")

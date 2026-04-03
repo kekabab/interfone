@@ -425,8 +425,10 @@
         }
 
         function setupSocket() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            socket = io();
+            socket = io({
+                transports: ['websocket'],
+                upgrade: false
+            });
 
             socket.on('connect', () => {
                 document.getElementById('online-dot').classList.add('online');
