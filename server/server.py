@@ -182,76 +182,56 @@ async def esp32_websocket(websocket: WebSocket):
 
     try:
         while True:
-            data = await websocket.receive()
+            try:
+                data = await asyncio.wait_for(websocket.receive(), timeout=30.0)
+            except asyncio.TimeoutError:
+                # Enviar um ping manual para manter a conexão ativa
+                await websocket.send_text("PING")
+                continue
 
             if "text" in data:
                 msg = data["text"]
-                print(f"[ESP32] Texto: {msg}")
+                print(f"[ESP32] Texto recebido: {msg}")
 
                 if msg == "BELL_PRESSED":
-                    # Campainha tocada, mas o App só mostra status "Visitante no portão"
-                    # A chamada sonora (Ringtone) virá depois com o TRIGGER_CALL
                     state.status = "visitor_arrived"
-                    print("\n🔔 Visitante no portão. Aguardando sequência do ESP32...")
-                    await sio.emit("intercom_status", {"status": "visitor_arrived", "message": "Alguém apertou a campainha..."})
+                    print("\n🔔 Campainha detectada!")
+                    await sio.emit("intercom_status", {"status": "visitor_arrived", "message": "Alguém no portão"})
 
                 elif msg == "TRIGGER_CALL":
-                    # ── AGORA SIM DISPARA A CHAMADA SONORA NO CELULAR ──
                     state.status = "ringing"
                     state.ring_start_time = time.time()
-                    print("\n☎️☎️☎️ DISPARANDO CHAMADA NO CELULAR!")
-                    await sio.emit("intercom_ring", {
-                        "timestamp": state.ring_start_time,
-                        "message": "Chamada do Interfone!"
-                    })
+                    print("\n☎️ DISPARANDO CHAMADA!")
+                    await sio.emit("intercom_ring", {"timestamp": state.ring_start_time})
 
                 elif msg == "AUDIO_START":
                     state.accumulated_audio = bytearray()
                     state.status = "active"
-                    print("[ESP32] Recebendo stream de áudio...")
-                    await sio.emit("intercom_status", {"status": "recording", "message": "Visitante falando..."})
+                    print("[ESP32] Stream de áudio iniciado...")
+                    await sio.emit("intercom_status", {"status": "recording"})
 
                 elif msg == "AUDIO_END":
                     if len(state.accumulated_audio) > 0:
-                        print(f"[ESP32] Stream completo: {len(state.accumulated_audio)} bytes. Transcrevendo...")
-                        await sio.emit("intercom_status", {"status": "transcribing", "message": "Processando voz..."})
-
-                        # Transcrever com Whisper
+                        print(f"[ESP32] Áudio recebido: {len(state.accumulated_audio)} bytes. Transcrevendo...")
+                        await sio.emit("intercom_status", {"status": "transcribing"})
                         text = await transcribe_audio(bytes(state.accumulated_audio))
                         state.current_transcript = text
-
-                        if text and len(text.strip()) > 3:
-                            resident = detect_resident(text)
-                            print(f"[IA] Visitante disse: '{text}' -> Morador: {resident}")
-
-                            await sio.emit("intercom_transcript", {
-                                "text": text,
-                                "resident": resident,
-                                "timestamp": time.time(),
-                            })
-                        else:
-                            await sio.emit("intercom_transcript", {
-                                "text": "(não entendi)",
-                                "resident": "todos",
-                                "timestamp": time.time(),
-                            })
-
+                        resident = detect_resident(text)
+                        await sio.emit("intercom_transcript", {"text": text, "resident": resident})
                         state.status = "waiting_response"
-                        await sio.emit("intercom_status", {"status": "waiting_response", "message": "Aguardando resposta do morador..."})
+                        await sio.emit("intercom_status", {"status": "waiting_response"})
 
             elif "bytes" in data:
-                # Dados binários de áudio do ESP32
                 state.accumulated_audio.extend(data["bytes"])
 
     except WebSocketDisconnect:
-        print("[-] ESP32 desconectado.")
-        state.esp32_ws = None
-        state.status = "idle"
-        await sio.emit("intercom_status", {"status": "offline", "message": "Interfone offline"})
+        print("[-] ESP32 desconectado normalmente.")
     except Exception as e:
-        print(f"[!] Erro ESP32 WS: {e}")
+        print(f"[!] Erro crítico no WebSocket do ESP32: {e}")
+    finally:
         state.esp32_ws = None
         state.status = "idle"
+        await sio.emit("intercom_status", {"status": "offline", "esp32_online": False})
 
 
 # ── Socket.IO Events (App dos Moradores) ──────────────────────
