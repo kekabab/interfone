@@ -1,0 +1,15 @@
+{
+  "name": "Interfone AI",
+  "short_name": "Interfone",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#4f46e5",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/1211/1211477.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

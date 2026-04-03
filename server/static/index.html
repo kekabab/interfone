@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Interfone AI - Residência 497</title>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#1a1a1a">
+    <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/1211/1211477.png">
+    <style>
+        :root {
+            /* Palette: Premium Dark / Indigo & Emerald */
+            --bg-base: #0B0E14;
+            --bg-surface: rgba(20, 25, 35, 0.65);
+            --bg-surface-elevated: rgba(30, 38, 56, 0.85);
+            --primary: #6366F1; /* Indigo */
+            --primary-glow: rgba(99, 102, 241, 0.4);
+            --accent: #10B981; /* Emerald */
+            --accent-glow: rgba(16, 185, 129, 0.4);
+            --danger: #F43F5E; /* Rose */
+            --danger-glow: rgba(244, 63, 94, 0.4);
+            --text-main: #F8FAFC;
+            --text-muted: #94A3B8;
+            --border-light: rgba(255, 255, 255, 0.08);
+            --glass-blur: blur(16px);
+        }
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            /* Subtly animated gradient background */
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.15) 0%, transparent 50%),
+                radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.1) 0%, transparent 50%);
+            background-attachment: fixed;
+            background-repeat: no-repeat;
+            background-size: cover;
+        }
+
+        /* ── HEADER ── */
+        .header {
+            padding: 24px 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+
+        .header h1 { 
+            font-size: 1.1rem; 
+            margin: 0 0 6px 0; 
+            font-weight: 600; 
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            background: linear-gradient(to right, #fff, #94a3b8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .status-badge {
+            background: var(--bg-surface);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--border-light);
+            border-radius: 30px;
+            padding: 6px 14px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-muted);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .dot { 
+            width: 8px; 
+            height: 8px; 
+            border-radius: 50%; 
+            background: #475569; 
+            transition: all 0.3s ease;
+        }
+        .dot.online { 
+            background: var(--accent); 
+            box-shadow: 0 0 12px var(--accent-glow); 
+        }
+
+        /* ── MAIN LAYOUT ── */
+        .main-content {
+            flex: 1;
+            padding: 0 20px 20px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            overflow-y: auto;
+            position: relative;
+            z-index: 5;
+        }
+
+        /* ── CALLING CARD (The "Ringing" State) ── */
+        .ringing-card {
+            display: none;
+            background: linear-gradient(145deg, var(--bg-surface-elevated), var(--bg-surface));
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 28px;
+            padding: 32px 24px;
+            text-align: center;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1);
+            position: relative;
+            overflow: hidden;
+            transform: translateY(20px);
+            opacity: 0;
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .ringing-card.active { 
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            transform: translateY(0);
+            opacity: 1;
+            animation: glowPulse 2s infinite;
+        }
+
+        @keyframes glowPulse {
+            0% { box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 0 var(--accent-glow); }
+            50% { box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 15px rgba(16, 185, 129, 0); }
+            100% { box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+
+        .avatar-circle {
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--accent), #047857);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 20px var(--accent-glow);
+            animation: bounceIn 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+        }
+
+        @keyframes bounceIn {
+            0% { transform: scale(0); }
+            100% { transform: scale(1); }
+        }
+
+        .ringing-card h3 { 
+            margin: 0 0 8px 0; 
+            font-size: 1.4rem; 
+            font-weight: 600; 
+        }
+        
+        .ringing-card p { 
+            margin: 0 0 24px 0; 
+            color: var(--text-muted); 
+            font-size: 0.95rem; 
+        }
+
+        /* ── TRANSCRIPTION AREA ── */
+        .transcription-card {
+            background: var(--bg-surface);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--border-light);
+            border-radius: 24px;
+            padding: 24px;
+            min-height: 120px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            transition: all 0.3s ease;
+        }
+
+        .transcription-card::before {
+            content: 'VISITANTE DIZ';
+            font-size: 0.65rem;
+            font-weight: 700;
+            color: var(--primary);
+            letter-spacing: 0.15em;
+            margin-bottom: 12px;
+            display: block;
+        }
+
+        #transcription-text {
+            font-size: 1.15rem;
+            line-height: 1.6;
+            color: var(--text-main);
+            font-weight: 400;
+        }
+        
+        #transcription-text .empty-state {
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
+        /* ── QUICK RESPONSES GRID ── */
+        .responses-heading {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-muted);
+            margin: 0 0 -10px 4px;
+            font-weight: 600;
+        }
+
+        .responses-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        .btn-response {
+            background: var(--bg-surface);
+            backdrop-filter: var(--glass-blur);
+            -webkit-backdrop-filter: var(--glass-blur);
+            border: 1px solid var(--border-light);
+            color: var(--text-main);
+            padding: 24px 16px;
+            border-radius: 24px;
+            font-family: inherit;
+            font-size: 0.95rem;
+            font-weight: 500;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .btn-response:active {
+            transform: scale(0.96);
+            background: var(--primary);
+            border-color: var(--primary);
+            box-shadow: 0 8px 20px var(--primary-glow);
+        }
+
+        .btn-response .emoji { 
+            font-size: 1.8rem; 
+            filter: drop-shadow(0 4px 6px rgba(0,0,0,0.2));
+            transition: transform 0.2s ease;
+        }
+        
+        .btn-response:active .emoji {
+            transform: scale(1.1);
+        }
+
+        /* ── BUTTONS (Action) ── */
+        .btn-action {
+            width: 100%;
+            padding: 16px;
+            border-radius: 100px;
+            border: none;
+            font-family: inherit;
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            transition: all 0.25s ease;
+        }
+
+        .btn-answer {
+            background: var(--accent);
+            box-shadow: 0 8px 25px var(--accent-glow);
+        }
+        .btn-answer:active { transform: scale(0.97); }
+
+        .btn-dismiss {
+            background: var(--bg-surface);
+            border: 1px solid var(--border-light);
+            color: var(--danger);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .btn-dismiss:active { 
+            background: rgba(244, 63, 94, 0.1);
+            border-color: var(--danger);
+            transform: scale(0.97); 
+        }
+
+        /* ── FOOTER ── */
+        .footer-actions {
+            padding: 20px;
+            z-index: 10;
+        }
+
+        /* Overlay for Initial Setup */
+        #init-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(11, 14, 20, 0.95);
+            backdrop-filter: blur(20px);
+            z-index: 1000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            text-align: center;
+        }
+
+        #init-overlay h2 {
+            font-size: 2rem;
+            background: linear-gradient(135deg, var(--text-main), var(--text-muted));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 10px;
+        }
+        
+        #init-overlay p {
+            color: var(--text-muted);
+            margin-bottom: 30px;
+            line-height: 1.5;
+        }
+
+        .btn-start {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 16px 36px;
+            border-radius: 100px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            box-shadow: 0 10px 30px var(--primary-glow);
+            transition: transform 0.2s ease;
+        }
+        .btn-start:active { transform: scale(0.95); }
+
+    </style>
+</head>
+<body>
+
+    <div id="init-overlay">
+        <h2>Interfone AI</h2>
+        <p>Clique abaixo para ativar o sistema de voz e monitoramento.</p>
+        <button class="btn-start" onclick="initApp()">Iniciar Monitoramento</button>
+    </div>
+
+    <div class="header">
+        <h1>PORTÃO EXECUTIVO</h1>
+        <div class="status-badge">
+            <div id="online-dot" class="dot"></div>
+            <span id="status-text">Conectando...</span>
+        </div>
+    </div>
+
+    <div class="main-content">
+        
+        <div id="ringing-card" class="ringing-card">
+            <div class="avatar-circle">📞</div>
+            <h3>Chamada do Interfone</h3>
+            <p>Alguém deseja falar com você.</p>
+            <button class="btn-action btn-answer" onclick="answerCall()">
+                <span>Atender Portão</span>
+            </button>
+        </div>
+
+        <div class="transcription-card">
+            <div id="transcription-text"><span class="empty-state">Monitorando áudio...</span></div>
+        </div>
+
+        <h4 class="responses-heading">Respostas Rápidas</h4>
+        <div class="responses-grid">
+            <button class="btn-response" onclick="sendResponse('descendo')">
+                <span class="emoji">🏃</span>
+                <span>Estou descendo</span>
+            </button>
+            <button class="btn-response" onclick="sendResponse('aguarde')">
+                <span class="emoji">⏳</span>
+                <span>Aguarde 2 min</span>
+            </button>
+            <button class="btn-response" onclick="sendResponse('ausente')">
+                <span class="emoji">🚫</span>
+                <span>Não estou</span>
+            </button>
+            <button class="btn-response" onclick="sendResponse('abrir')">
+                <span class="emoji">🔓</span>
+                <span>Pode entrar</span>
+            </button>
+        </div>
+
+    </div>
+
+    <div class="footer-actions">
+        <button class="btn-action btn-dismiss" onclick="dismissCall()">Dispensar Chamada</button>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        let socket;
+        let ringTone;
+        let isAppStarted = false;
+
+        function initApp() {
+            // Requer toque do usuário para permitir áudio
+            document.getElementById('init-overlay').style.display = 'none';
+            isAppStarted = true;
+            
+            // Som de chamada (Telefone tocando)
+            ringTone = new Audio('https://www.soundjay.com/phone/sounds/phone-calling-1.mp3');
+            ringTone.loop = true;
+
+            setupSocket();
+        }
+
+        function setupSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            socket = io();
+
+            socket.on('connect', () => {
+                document.getElementById('online-dot').classList.add('online');
+                document.getElementById('status-text').innerText = 'Online';
+            });
+
+            socket.on('disconnect', () => {
+                document.getElementById('online-dot').classList.remove('online');
+                document.getElementById('status-text').innerText = 'Offline';
+            });
+
+            socket.on('intercom_ring', (data) => {
+                const ringCard = document.getElementById('ringing-card');
+                ringCard.classList.add('active');
+                ringCard.scrollIntoView({ behavior: 'smooth' });
+                
+                ringTone.play().catch(e => console.log("Erro ao tocar:", e));
+                
+                // Vibrar continuamente enquanto toca (se suportado)
+                if (navigator.vibrate) {
+                    navigator.vibrate([1000, 500, 1000, 500, 1000]);
+                }
+            });
+
+            socket.on('intercom_status', (data) => {
+                document.getElementById('status-text').innerText = data.message;
+            });
+
+            socket.on('intercom_transcript', (data) => {
+                document.getElementById('transcription-text').innerText = data.text;
+                // Para a campainha quando a voz é processada
+                ringTone.pause();
+                ringTone.currentTime = 0;
+                document.getElementById('ringing-card').classList.remove('active');
+            });
+        }
+
+        function answerCall() {
+            ringTone.pause();
+            ringTone.currentTime = 0;
+            document.getElementById('ringing-card').classList.remove('active');
+        }
+
+        function sendResponse(key) {
+            answerCall(); // Garante que o som pare ao responder
+            socket.emit('quick_response', { response: key });
+            document.getElementById('transcription-text').innerText = 'Enviando resposta...';
+        }
+
+        function dismissCall() {
+            socket.emit('dismiss_call', {});
+            answerCall();
+            document.getElementById('transcription-text').innerText = 'Aguardando áudio...';
+        }
+
+        // Register Service Worker
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js').then(reg => {
+                    console.log('SW registrado!', reg);
+                }).catch(err => {
+                    console.log('Erro no SW:', err);
+                });
+            });
+        }
+    </script>
+</body>
+</html>
