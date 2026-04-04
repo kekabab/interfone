@@ -19,10 +19,8 @@ import socketio
 from openai import AsyncOpenAI
 
 # ── Configuração ──────────────────────────────────────────────
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-
-os.environ["OPENAI_API_KEY"] = OPENAI_API_KEY
-client = AsyncOpenAI()
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
 AUDIO_DIR = Path(__file__).parent
 STATIC_DIR = Path(__file__).parent / "static"
