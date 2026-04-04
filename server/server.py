@@ -276,6 +276,9 @@ async def quick_response(sid, data):
                 # Enviar comando com sample rate (8000 para respostas rápidas)
                 await state.esp32_ws.send_text(f"PLAY_RESPONSE:8000:{audio_file}")
                 
+                # Pequena pausa para o ESP32 abrir o pipeline de áudio
+                await asyncio.sleep(0.2)
+                
                 # Enviar dados binários do áudio em chunks
                 chunk_size = 4096
                 for i in range(0, len(audio_data), chunk_size):
