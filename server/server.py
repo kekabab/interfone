@@ -187,13 +187,7 @@ async def esp32_websocket(websocket: WebSocket):
 
     try:
         while True:
-            try:
-                data = await asyncio.wait_for(websocket.receive(), timeout=30.0)
-            except asyncio.TimeoutError:
-                # Enviar um ping manual para manter a conexão ativa
-                await websocket.send_text("PING")
-                continue
-
+            data = await websocket.receive()
             if "text" in data:
                 msg = data["text"]
                 print(f"[ESP32] Texto recebido: {msg}")
@@ -281,7 +275,8 @@ async def quick_response(sid, data):
         if state.esp32_ws:
             try:
                 start_time = time.time()
-                await state.esp32_ws.send_text(f"PLAY_RESPONSE:{audio_file}")
+                # Enviar comando com sample rate (8000 para respostas rápidas)
+                await state.esp32_ws.send_text(f"PLAY_RESPONSE:8000:{audio_file}")
                 
                 # Enviar dados binários do áudio em chunks
                 chunk_size = 4096
