@@ -29,24 +29,14 @@ STATIC_DIR = Path(__file__).parent / "static"
 QUICK_RESPONSES = {
     "descendo": {
         "label": "🏃 Estou descendo!",
-        "text": "O morador já está descendo, aguarde um momento.",
+        "text": "O morador pediu para aguardar, pois já está descendo.",
         "audio_file": "resp_descendo.raw",
-    },
-    "aguarde": {
-        "label": "⏳ Aguarde 2 minutos",
-        "text": "Aguarde dois minutos, o morador já está a caminho.",
-        "audio_file": "resp_aguarde.raw",
     },
     "ausente": {
         "label": "🚫 Não estou em casa",
-        "text": "O morador não se encontra no momento. Se possível, volte mais tarde.",
+        "text": "Lamentamos, mas o morador não se encontra no momento.",
         "audio_file": "resp_ausente.raw",
-    },
-    "abrir": {
-        "label": "🔓 Pode entrar!",
-        "text": "Pode entrar, vou liberar a porta.",
-        "audio_file": "resp_abrir.raw",
-    },
+    }
 }
 
 # ── Estado Global ─────────────────────────────────────────────
@@ -285,9 +275,15 @@ async def quick_response(sid, data):
                     chunk = audio_data[i:i + chunk_size]
                     await state.esp32_ws.send_bytes(chunk)
                 
+                # CÁLCULO DE TEMPO: Áudio PCM 16-bit 8000Hz = 16.000 bytes consumidos por segundo.
+                # Se não esperarmos o áudio terminar de tocar, o "PLAY_DONE" chega antes da hora no ESP32 e corta a fala!
+                duration = len(audio_data) / 16000.0
+                print(f"[AUDIO] Aguardando o buffer tocar no ESP32 por {duration:.2f}s...")
+                await asyncio.sleep(duration + 0.5) # Espera a duração do áudio + meio segundo de margem
+                
                 await state.esp32_ws.send_text("PLAY_DONE")
                 elapsed = (time.time() - start_time) * 1000
-                print(f"[AUDIO] Finalizado em {elapsed:.2f}ms! ({len(audio_data)} bytes)")
+                print(f"[AUDIO] Playback finalizado em {elapsed:.2f}ms. Total: {len(audio_data)} bytes")
             except Exception as e:
                 print(f"[AUDIO] Erro ao enviar: {e}")
     else:
