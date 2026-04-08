@@ -47,6 +47,7 @@ class IntercomState:
         self.current_transcript = ""
         self.ring_start_time: float = 0.0
         self.accumulated_audio = bytearray()
+        self.last_audio_time: float = 0.0
         self.audio_cache: dict[str, bytes] = {}  # Cache de áudios pré-carregados
         self.call_timeout_task: asyncio.Task | None = None  # Task de timeout da chamada
 
@@ -215,16 +216,32 @@ async def esp32_websocket(websocket: WebSocket):
                 elif msg == "AUDIO_END":
                     if len(state.accumulated_audio) > 0:
                         print(f"[ESP32] Áudio recebido: {len(state.accumulated_audio)} bytes. Transcrevendo...")
-                        await sio.emit("intercom_status", {"status": "transcribing"})
-                        text = await transcribe_audio(bytes(state.accumulated_audio))
-                        state.current_transcript = text
-                        resident = detect_resident(text)
-                        await sio.emit("intercom_transcript", {"text": text, "resident": resident})
+                        await sio.emit("intercom_status", {"status": "transcribing", "message": "🧠 IA Processando fala..."})
+                        try:
+                            text = await transcribe_audio(bytes(state.accumulated_audio))
+                            state.current_transcript = text
+                            if text:
+                                resident = detect_resident(text)
+                                await sio.emit("intercom_transcript", {"text": text, "resident": resident})
+                            else:
+                                print("[WHISPER] Transcrição retornou vazia.")
+                                await sio.emit("intercom_transcript", {"text": "", "message": "Nenhuma fala detectada"})
+                        except Exception as e:
+                            print(f"[ERROR] Falha na transcrição: {e}")
+                            await sio.emit("intercom_transcript", {"text": "", "message": "Erro na transcrição"})
+                            
                         state.status = "waiting_response"
-                        await sio.emit("intercom_status", {"status": "waiting_response"})
+                        await sio.emit("intercom_status", {"status": "waiting_response", "message": "Aguardando sua resposta..."})
 
             elif "bytes" in data:
                 state.accumulated_audio.extend(data["bytes"])
+                state.last_audio_time = time.time()
+                
+                # Se acumulamos muito áudio (ex: > 15s), podemos ter perdido o AUDIO_END
+                # 8000Hz * 2 bytes * 15s = 240.000 bytes
+                if len(state.accumulated_audio) > 240000:
+                   print("[DEBUG] Buffer de áudio muito grande, forçando transcrição...")
+                   # Aqui poderíamos disparar a transcrição se necessário
 
     except WebSocketDisconnect:
         print("[-] ESP32 desconectado normalmente.")
