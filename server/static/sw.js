@@ -1,4 +1,4 @@
-const CACHE_NAME = 'interfone-ai-v2';
+const CACHE_NAME = 'interfone-ai-v3';
 const ASSETS = [
     '/',
     '/static/manifest.json'
