@@ -401,17 +401,96 @@
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <script>
         let socket;
-        let ringTone;
         let isAppStarted = false;
+        let audioCtx;
+        let ringOscillator = null;
+        let ringGain = null;
+        let ringInterval = null;
+
+        // ── Gera som de campainha via Web Audio API (não depende de URL externa) ──
+        function startRingTone() {
+            if (ringInterval) return; // Já está tocando
+            
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            
+            let isOn = true;
+            function playBurst() {
+                if (!isOn) {
+                    // Pausa entre rings
+                    isOn = true;
+                    return;
+                }
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+                osc.frequency.setValueAtTime(600, audioCtx.currentTime + 0.15);
+                osc.frequency.setValueAtTime(800, audioCtx.currentTime + 0.3);
+                osc.frequency.setValueAtTime(600, audioCtx.currentTime + 0.45);
+                
+                gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.6);
+                
+                osc.start(audioCtx.currentTime);
+                osc.stop(audioCtx.currentTime + 0.6);
+                isOn = false;
+            }
+            
+            playBurst();
+            ringInterval = setInterval(playBurst, 800);
+        }
+
+        function stopRingTone() {
+            if (ringInterval) {
+                clearInterval(ringInterval);
+                ringInterval = null;
+            }
+        }
+
+        // ── Notificação do navegador ──
+        function sendNotification(title, body) {
+            if (Notification.permission === 'granted') {
+                try {
+                    new Notification(title, {
+                        body: body,
+                        icon: 'https://cdn-icons-png.flaticon.com/512/1211/1211477.png',
+                        vibrate: [300, 100, 300, 100, 300],
+                        tag: 'interfone-ring',
+                        renotify: true,
+                        requireInteraction: true
+                    });
+                } catch(e) {
+                    // Fallback para Service Worker notification
+                    if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+                        navigator.serviceWorker.ready.then(reg => {
+                            reg.showNotification(title, {
+                                body: body,
+                                icon: 'https://cdn-icons-png.flaticon.com/512/1211/1211477.png',
+                                vibrate: [300, 100, 300, 100, 300],
+                                tag: 'interfone-ring',
+                                renotify: true,
+                                requireInteraction: true
+                            });
+                        });
+                    }
+                }
+            }
+        }
 
         function initApp() {
-            // Requer toque do usuário para permitir áudio
             document.getElementById('init-overlay').style.display = 'none';
             isAppStarted = true;
             
-            // Som de chamada (Telefone tocando)
-            ringTone = new Audio('https://www.soundjay.com/phone/sounds/phone-calling-1.mp3');
-            ringTone.loop = true;
+            // Criar AudioContext com o gesto do usuário
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            
+            // Pedir permissão de notificação
+            if ('Notification' in window && Notification.permission === 'default') {
+                Notification.requestPermission();
+            }
 
             setupSocket();
         }
@@ -437,43 +516,74 @@
                 ringCard.classList.add('active');
                 ringCard.scrollIntoView({ behavior: 'smooth' });
                 
-                ringTone.play().catch(e => console.log("Erro ao tocar:", e));
+                // Som de campainha gerado localmente
+                startRingTone();
                 
-                // Vibrar continuamente enquanto toca (se suportado)
+                // Notificação do navegador (funciona com app em background)
+                sendNotification('🔔 Interfone Tocando!', 'Alguém está no portão. Toque para atender.');
+                
+                // Vibrar forte e por bastante tempo
                 if (navigator.vibrate) {
-                    navigator.vibrate([1000, 500, 1000, 500, 1000]);
+                    navigator.vibrate([500, 200, 500, 200, 500, 200, 500, 200, 500, 200, 500]);
                 }
+                
+                // Resetar texto de transcrição
+                document.getElementById('transcription-text').innerHTML = '<span class="empty-state">Ouvindo visitante...</span>';
             });
 
             socket.on('intercom_status', (data) => {
-                document.getElementById('status-text').innerText = data.message;
+                const statusText = document.getElementById('status-text');
+                if (data.message) {
+                    statusText.innerText = data.message;
+                }
+                if (data.status === 'recording') {
+                    document.getElementById('transcription-text').innerHTML = '<span class="empty-state">🎙️ Gravando voz do visitante...</span>';
+                } else if (data.status === 'transcribing') {
+                    document.getElementById('transcription-text').innerHTML = '<span class="empty-state">🧠 Processando fala...</span>';
+                } else if (data.status === 'idle') {
+                    stopRingTone();
+                    document.getElementById('ringing-card').classList.remove('active');
+                }
             });
 
             socket.on('intercom_transcript', (data) => {
-                document.getElementById('transcription-text').innerText = data.text;
+                const transcriptEl = document.getElementById('transcription-text');
+                if (data.text && data.text.trim() !== '') {
+                    transcriptEl.innerText = '🗣️ "' + data.text + '"';
+                    transcriptEl.style.fontSize = '1.3rem';
+                    transcriptEl.style.fontWeight = '500';
+                    
+                    // Notificação com o que o visitante disse
+                    sendNotification('🗣️ Visitante disse:', data.text);
+                } else {
+                    transcriptEl.innerHTML = '<span class="empty-state">Não foi possível entender o visitante.</span>';
+                }
+                
                 // Para a campainha quando a voz é processada
-                ringTone.pause();
-                ringTone.currentTime = 0;
+                stopRingTone();
                 document.getElementById('ringing-card').classList.remove('active');
             });
         }
 
         function answerCall() {
-            ringTone.pause();
-            ringTone.currentTime = 0;
+            stopRingTone();
             document.getElementById('ringing-card').classList.remove('active');
+            if (navigator.vibrate) navigator.vibrate(0); // Para vibração
         }
 
         function sendResponse(key) {
-            answerCall(); // Garante que o som pare ao responder
+            answerCall();
             socket.emit('quick_response', { response: key });
-            document.getElementById('transcription-text').innerText = 'Enviando resposta...';
+            document.getElementById('transcription-text').innerText = '✅ Resposta enviada!';
+            document.getElementById('transcription-text').style.fontSize = '';
+            document.getElementById('transcription-text').style.fontWeight = '';
         }
 
         function dismissCall() {
             socket.emit('dismiss_call', {});
             answerCall();
-            document.getElementById('transcription-text').innerText = 'Aguardando áudio...';
+            document.getElementById('transcription-text').innerHTML = '<span class="empty-state">Monitorando áudio...</span>';
+            document.getElementById('transcription-text').style.fontSize = '';
         }
 
         // Register Service Worker
