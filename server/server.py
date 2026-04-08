@@ -43,11 +43,12 @@ QUICK_RESPONSES = {
 class IntercomState:
     def __init__(self):
         self.esp32_ws: WebSocket | None = None
-        self.status = "idle"  # idle, ringing, active, playing_response
+        self.status = "idle"  # idle, ringing, active, playing_response, waiting_response
         self.current_transcript = ""
         self.ring_start_time: float = 0.0
         self.accumulated_audio = bytearray()
         self.audio_cache: dict[str, bytes] = {}  # Cache de áudios pré-carregados
+        self.call_timeout_task: asyncio.Task | None = None  # Task de timeout da chamada
 
     def load_audio_cache(self):
         """Carrega todos os arquivos .raw associados às respostas rápidas."""
@@ -166,6 +167,15 @@ def detect_resident(text: str) -> str:
     return "todos"
 
 
+async def call_timeout(seconds: int = 40):
+    """Encerra a sessão de atendimento automaticamente depois de N segundos."""
+    await asyncio.sleep(seconds)
+    if state.status in ("waiting_response", "playing_response", "ringing", "active"):
+        print(f"[TIMEOUT] Sessão encerrada após {seconds}s")
+        state.status = "idle"
+        await sio.emit("intercom_status", {"status": "idle", "message": "Sessão encerrada"})
+
+
 # ── WebSocket do ESP32 ────────────────────────────────────────
 @app.websocket("/ws/esp32")
 async def esp32_websocket(websocket: WebSocket):
@@ -189,6 +199,11 @@ async def esp32_websocket(websocket: WebSocket):
                     state.status = "ringing"
                     state.ring_start_time = time.time()
                     print("\n☎️ DISPARANDO CHAMADA!")
+                    # Cancela timeout anterior se existir
+                    if state.call_timeout_task and not state.call_timeout_task.done():
+                        state.call_timeout_task.cancel()
+                    # Inicia timeout de 40 segundos para esta sessão
+                    state.call_timeout_task = asyncio.create_task(call_timeout(40))
                     await sio.emit("intercom_ring", {"timestamp": state.ring_start_time})
 
                 elif msg == "AUDIO_START":
@@ -266,8 +281,12 @@ async def quick_response(sid, data):
                 # Enviar comando com sample rate (8000 para respostas rápidas)
                 await state.esp32_ws.send_text(f"PLAY_RESPONSE:8000:{audio_file}")
                 
-                # Pequena pausa para o ESP32 abrir o pipeline de áudio
-                await asyncio.sleep(0.2)
+                # Aumentamos pausa para o ESP32 abrir o pipeline com segurança
+                await asyncio.sleep(0.4)
+                
+                # Enviar 400ms de silêncio para dar tempo de o DAC/Amplificador desmutar antes do "Certo..."
+                # 8000 samples/sec * 2 bytes/sample * 0.4s = 6400 bytes
+                await state.esp32_ws.send_bytes(bytes(6400))
                 
                 # Enviar dados binários do áudio em chunks
                 chunk_size = 4096
@@ -293,8 +312,8 @@ async def quick_response(sid, data):
         if state.esp32_ws:
             await state.esp32_ws.send_text(f"TTS:{resp['text']}")
 
-    state.status = "idle"
-    await sio.emit("intercom_status", {"status": "idle", "message": "Pronto"})
+    state.status = "waiting_response"
+    await sio.emit("intercom_status", {"status": "waiting_response", "message": "Resposta enviada! Pode enviar outra."})
 
 
 @sio.event
