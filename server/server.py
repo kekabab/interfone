@@ -34,12 +34,20 @@ AUDIO_DIR = Path(__file__).parent
 STATIC_DIR = Path(__file__).parent / "static"
 
 # ── VAPID Keys (variáveis de ambiente no Render) ───────────────
-# Para gerar as chaves, execute 1x localmente:
-#   pip install pywebpush
-#   python -c "from pywebpush import Vapid; v=Vapid(); v.generate_keys(); print('PRIVATE:', v.private_key); print('PUBLIC:', v.public_key)"
+# Formato esperado: base64url raw (chave curta de ~43 chars, SEM headers PEM)
+# Para gerar: python -c "
+im#   from cryptography.hazmat.primitives.asymmetric import ec
+#   import base64
+#   k = ec.generate_private_key(ec.SECP256R1())
+#   raw = k.private_numbers().private_value.to_bytes(32,'big')
+#   print(base64.urlsafe_b64encode(raw).rstrip(b'=').decode())
+# "
 VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
 VAPID_PUBLIC_KEY  = os.environ.get("VAPID_PUBLIC_KEY", "")
 VAPID_EMAIL       = os.environ.get("VAPID_EMAIL", "mailto:admin@interfone.local")
+
+# Arquivo para persistir subscriptions Push entre deploys
+SUBSCRIPTIONS_FILE = Path(__file__).parent / "push_subscriptions.json"
 
 # ── Respostas Rápidas (mapeadas para arquivos de áudio .raw) ──
 QUICK_RESPONSES = {
@@ -66,8 +74,26 @@ class IntercomState:
         self.last_audio_time: float = 0.0
         self.audio_cache: dict[str, bytes] = {}  # Cache de áudios pré-carregados
         self.call_timeout_task: asyncio.Task | None = None  # Task de timeout da chamada
-        self.push_subscriptions: list[dict] = []  # Subscriptions Web Push dos moradores
+        self.push_subscriptions: list[dict] = self._load_subscriptions()
         self.response_lock = asyncio.Lock()  # Evita double-send simultâneo
+
+    def _load_subscriptions(self) -> list:
+        """Carrega subscriptions salvas em disco (sobrevivem a redeploy)."""
+        try:
+            if SUBSCRIPTIONS_FILE.exists():
+                data = json.loads(SUBSCRIPTIONS_FILE.read_text())
+                print(f"[PUSH] {len(data)} subscription(s) carregada(s) do disco.")
+                return data
+        except Exception as e:
+            print(f"[PUSH] Erro ao carregar subscriptions: {e}")
+        return []
+
+    def _save_subscriptions(self):
+        """Salva subscriptions em disco para sobreviver a restarts."""
+        try:
+            SUBSCRIPTIONS_FILE.write_text(json.dumps(self.push_subscriptions))
+        except Exception as e:
+            print(f"[PUSH] Erro ao salvar subscriptions: {e}")
 
     def load_audio_cache(self):
         """Carrega todos os arquivos .raw associados às respostas rápidas."""
@@ -143,15 +169,39 @@ async def push_subscribe(request: Request):
     """Recebe e salva a subscription Push do browser do morador."""
     try:
         sub = await request.json()
-        # Evitar duplicatas (mesmo endpoint)
         endpoint = sub.get("endpoint", "")
         state.push_subscriptions = [s for s in state.push_subscriptions if s.get("endpoint") != endpoint]
         state.push_subscriptions.append(sub)
+        state._save_subscriptions()
         print(f"[PUSH] Nova subscription salva. Total: {len(state.push_subscriptions)}")
         return JSONResponse({"ok": True, "total": len(state.push_subscriptions)})
     except Exception as e:
         print(f"[PUSH] Erro ao salvar subscription: {e}")
         return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+@app.delete("/api/subscribe")
+async def push_unsubscribe(request: Request):
+    """Remove a subscription Push do morador."""
+    try:
+        body = await request.json()
+        endpoint = body.get("endpoint", "")
+        before = len(state.push_subscriptions)
+        state.push_subscriptions = [s for s in state.push_subscriptions if s.get("endpoint") != endpoint]
+        state._save_subscriptions()
+        print(f"[PUSH] Subscription removida. {before} → {len(state.push_subscriptions)}")
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+@app.post("/api/test-push")
+async def test_push():
+    """Dispara um push de teste para todas as subscriptions ativas. Útil para diagnóstico."""
+    if not state.push_subscriptions:
+        return JSONResponse({"ok": False, "error": "Nenhuma subscription ativa. Ative o push no PWA primeiro."})
+    await send_push_notifications("🔔 Teste do Interfone!", "Push funcionando! Tela apagada OK.")
+    return JSONResponse({"ok": True, "total_subs": len(state.push_subscriptions)})
 
 
 @app.delete("/api/subscribe")
@@ -172,25 +222,26 @@ async def push_unsubscribe(request: Request):
 async def send_push_notifications(title: str, body: str):
     """Envia notificação Push para todos os moradores, mesmo com app fechado."""
     if not WEBPUSH_AVAILABLE or not VAPID_PRIVATE_KEY:
-        print("[PUSH] Skipping push: pywebpush não disponível ou chave não configurada.")
+        print("[PUSH] Skipping push: pywebpush não disponível ou VAPID_PRIVATE_KEY não configurada.")
         return
 
     if not state.push_subscriptions:
         print("[PUSH] Sem subscriptions ativas.")
         return
 
+    print(f"[PUSH] Enviando para {len(state.push_subscriptions)} subscription(s)...")
     payload = json.dumps({"title": title, "body": body})
     dead_subscriptions = []
 
     for sub in state.push_subscriptions:
         try:
-            # pywebpush espera a chave PEM com quebras de linha reais
-            vapid_key = VAPID_PRIVATE_KEY.replace("\\n", "\n")
+            # VAPID_PRIVATE_KEY deve ser base64url raw (ex: 'MAm8o2A0eh...')
+            # NÃO PEM — formato mais confiável com pywebpush
             await asyncio.to_thread(
                 webpush,
                 subscription_info=sub,
                 data=payload,
-                vapid_private_key=vapid_key,
+                vapid_private_key=VAPID_PRIVATE_KEY,
                 vapid_claims={"sub": VAPID_EMAIL},
                 content_encoding="aes128gcm",
             )
@@ -206,6 +257,7 @@ async def send_push_notifications(title: str, body: str):
     # Limpar subscriptions mortas
     if dead_subscriptions:
         state.push_subscriptions = [s for s in state.push_subscriptions if s.get("endpoint") not in dead_subscriptions]
+        state._save_subscriptions()
         print(f"[PUSH] {len(dead_subscriptions)} subscription(s) expirada(s) removida(s).")
 
 
