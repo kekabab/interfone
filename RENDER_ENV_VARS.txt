@@ -1,0 +1,20 @@
+# =====================================================
+# VARIÁVEIS DE AMBIENTE - INTERFONE AI (Render.com)
+# =====================================================
+# Adicione estas 3 variáveis em:
+# Render → interfone.onrender.com → Environment → Add Environment Variable
+#
+# ⚠️  NUNCA compartilhe VAPID_PRIVATE_KEY publicamente!
+# =====================================================
+
+VAPID_PUBLIC_KEY=BL76czCGxDWRrHzpF-LTFkWwCsQ7WBoq1L5sx3S1ZWHWZm3ChQepVXZe41C-kMdgDhVN_rouo1CmBtbvcdE8Vgo
+
+# Para a chave privada no Render, cole o valor PEM em UMA LINHA usando \n como separador:
+# (o servidor já substitui \n por quebra de linha real automaticamente)
+VAPID_PRIVATE_KEY=-----BEGIN EC PRIVATE KEY-----\nMHcCAQEEIDAJvKNgNHoRu7XoAJpTx94y2Zt3F4gGia7GWV+AwD4soAoGCCqGSM49\nAwEHoUQDQgAEvvpzMIbENZGsfOkX4tMWRbAKxDtYGirUvmzHdLVlYdZmbcKFB6lV\ndl7jUL6Qx2AOFU3+ui6jUKYG1u9x0TxWCg==\n-----END EC PRIVATE KEY-----
+
+# Substitua pelo seu e-mail real:
+VAPID_EMAIL=mailto:SEU_EMAIL@gmail.com
+
+# Já existente (não mude):
+OPENAI_API_KEY=<sua chave existente>

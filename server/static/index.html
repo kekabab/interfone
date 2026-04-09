@@ -9,16 +9,17 @@
     <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/1211/1211477.png">
     <style>
         :root {
-            /* Palette: Premium Dark / Indigo & Emerald */
             --bg-base: #0B0E14;
             --bg-surface: rgba(20, 25, 35, 0.65);
             --bg-surface-elevated: rgba(30, 38, 56, 0.85);
-            --primary: #6366F1; /* Indigo */
+            --primary: #6366F1;
             --primary-glow: rgba(99, 102, 241, 0.4);
-            --accent: #10B981; /* Emerald */
+            --accent: #10B981;
             --accent-glow: rgba(16, 185, 129, 0.4);
-            --danger: #F43F5E; /* Rose */
+            --danger: #F43F5E;
             --danger-glow: rgba(244, 63, 94, 0.4);
+            --warning: #F59E0B;
+            --warning-glow: rgba(245, 158, 11, 0.35);
             --text-main: #F8FAFC;
             --text-muted: #94A3B8;
             --border-light: rgba(255, 255, 255, 0.08);
@@ -26,10 +27,9 @@
         }
 
         * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        
+
         body {
-            margin: 0;
-            padding: 0;
+            margin: 0; padding: 0;
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
             background-color: var(--bg-base);
             color: var(--text-main);
@@ -37,8 +37,7 @@
             display: flex;
             flex-direction: column;
             overflow: hidden;
-            /* Subtly animated gradient background */
-            background-image: 
+            background-image:
                 radial-gradient(circle at 15% 50%, rgba(99, 102, 241, 0.15) 0%, transparent 50%),
                 radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.1) 0%, transparent 50%);
             background-attachment: fixed;
@@ -48,18 +47,19 @@
 
         /* ── HEADER ── */
         .header {
-            padding: 24px 20px;
+            padding: 20px 20px 12px 20px;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             z-index: 10;
+            gap: 8px;
         }
 
-        .header h1 { 
-            font-size: 1.1rem; 
-            margin: 0 0 6px 0; 
-            font-weight: 600; 
+        .header h1 {
+            font-size: 1.1rem;
+            margin: 0;
+            font-weight: 600;
             letter-spacing: 0.05em;
             text-transform: uppercase;
             background: linear-gradient(to right, #fff, #94a3b8);
@@ -68,47 +68,51 @@
             -webkit-text-fill-color: transparent;
         }
 
+        .badges-row {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
         .status-badge {
             background: var(--bg-surface);
             backdrop-filter: var(--glass-blur);
             -webkit-backdrop-filter: var(--glass-blur);
             border: 1px solid var(--border-light);
             border-radius: 30px;
-            padding: 6px 14px;
-            font-size: 0.75rem;
+            padding: 5px 12px;
+            font-size: 0.72rem;
             font-weight: 500;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 7px;
             color: var(--text-muted);
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
 
-        .dot { 
-            width: 8px; 
-            height: 8px; 
-            border-radius: 50%; 
-            background: #475569; 
+        .dot {
+            width: 7px; height: 7px;
+            border-radius: 50%;
+            background: #475569;
             transition: all 0.3s ease;
         }
-        .dot.online { 
-            background: var(--accent); 
-            box-shadow: 0 0 12px var(--accent-glow); 
-        }
+        .dot.online { background: var(--accent); box-shadow: 0 0 10px var(--accent-glow); }
+        .dot.push-active { background: var(--primary); box-shadow: 0 0 10px var(--primary-glow); }
 
         /* ── MAIN LAYOUT ── */
         .main-content {
             flex: 1;
-            padding: 0 20px 20px 20px;
+            padding: 0 16px 16px 16px;
             display: flex;
             flex-direction: column;
-            gap: 24px;
+            gap: 16px;
             overflow-y: auto;
             position: relative;
             z-index: 5;
         }
 
-        /* ── CALLING CARD (The "Ringing" State) ── */
+        /* ── CALLING CARD ── */
         .ringing-card {
             display: none;
             background: linear-gradient(145deg, var(--bg-surface-elevated), var(--bg-surface));
@@ -116,7 +120,7 @@
             -webkit-backdrop-filter: var(--glass-blur);
             border: 1px solid rgba(16, 185, 129, 0.3);
             border-radius: 28px;
-            padding: 32px 24px;
+            padding: 28px 20px;
             text-align: center;
             box-shadow: 0 20px 40px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1);
             position: relative;
@@ -126,7 +130,7 @@
             transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
         }
 
-        .ringing-card.active { 
+        .ringing-card.active {
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -136,51 +140,39 @@
         }
 
         @keyframes glowPulse {
-            0% { box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 0 var(--accent-glow); }
-            50% { box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 15px rgba(16, 185, 129, 0); }
-            100% { box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 0 rgba(16, 185, 129, 0); }
+            0%   { box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 0 var(--accent-glow); }
+            50%  { box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 15px rgba(16,185,129,0); }
+            100% { box-shadow: 0 20px 40px rgba(0,0,0,0.4), 0 0 0 0 rgba(16,185,129,0); }
         }
 
         .avatar-circle {
-            width: 80px;
-            height: 80px;
+            width: 76px; height: 76px;
             border-radius: 50%;
             background: linear-gradient(135deg, var(--accent), #047857);
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            display: flex; align-items: center; justify-content: center;
             font-size: 2rem;
-            margin-bottom: 20px;
+            margin-bottom: 16px;
             box-shadow: 0 10px 20px var(--accent-glow);
             animation: bounceIn 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
         }
 
         @keyframes bounceIn {
-            0% { transform: scale(0); }
+            0%   { transform: scale(0); }
             100% { transform: scale(1); }
         }
 
-        .ringing-card h3 { 
-            margin: 0 0 8px 0; 
-            font-size: 1.4rem; 
-            font-weight: 600; 
-        }
-        
-        .ringing-card p { 
-            margin: 0 0 24px 0; 
-            color: var(--text-muted); 
-            font-size: 0.95rem; 
-        }
+        .ringing-card h3 { margin: 0 0 6px 0; font-size: 1.3rem; font-weight: 600; }
+        .ringing-card p  { margin: 0 0 20px 0; color: var(--text-muted); font-size: 0.9rem; }
 
-        /* ── TRANSCRIPTION AREA ── */
+        /* ── TRANSCRIPTION ── */
         .transcription-card {
             background: var(--bg-surface);
             backdrop-filter: var(--glass-blur);
             -webkit-backdrop-filter: var(--glass-blur);
             border: 1px solid var(--border-light);
             border-radius: 24px;
-            padding: 24px;
-            min-height: 120px;
+            padding: 20px;
+            min-height: 110px;
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -190,40 +182,39 @@
 
         .transcription-card::before {
             content: 'VISITANTE DIZ';
-            font-size: 0.65rem;
+            font-size: 0.62rem;
             font-weight: 700;
             color: var(--primary);
             letter-spacing: 0.15em;
-            margin-bottom: 12px;
+            margin-bottom: 10px;
             display: block;
         }
 
         #transcription-text {
-            font-size: 1.15rem;
+            font-size: 1.1rem;
             line-height: 1.6;
             color: var(--text-main);
-            font-weight: 400;
         }
-        
+
         #transcription-text .empty-state {
             color: var(--text-muted);
             font-style: italic;
         }
 
-        /* ── QUICK RESPONSES GRID ── */
+        /* ── RESPONSES GRID ── */
         .responses-heading {
-            font-size: 0.8rem;
+            font-size: 0.75rem;
             text-transform: uppercase;
             letter-spacing: 0.1em;
             color: var(--text-muted);
-            margin: 0 0 -10px 4px;
+            margin: 0 0 -6px 4px;
             font-weight: 600;
         }
 
         .responses-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 16px;
+            gap: 14px;
         }
 
         .btn-response {
@@ -232,60 +223,74 @@
             -webkit-backdrop-filter: var(--glass-blur);
             border: 1px solid var(--border-light);
             color: var(--text-main);
-            padding: 24px 16px;
+            padding: 22px 14px;
             border-radius: 24px;
             font-family: inherit;
-            font-size: 0.95rem;
+            font-size: 0.9rem;
             font-weight: 500;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            gap: 12px;
-            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            gap: 10px;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
             cursor: pointer;
             box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            position: relative;
+            overflow: hidden;
         }
 
-        .btn-response:active {
-            transform: scale(0.96);
+        .btn-response:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-response:not(:disabled):active {
+            transform: scale(0.95);
             background: var(--primary);
             border-color: var(--primary);
             box-shadow: 0 8px 20px var(--primary-glow);
         }
 
-        .btn-response .emoji { 
-            font-size: 1.8rem; 
+        /* Feedback de sucesso */
+        .btn-response.success {
+            border-color: var(--accent);
+            background: rgba(16, 185, 129, 0.12);
+            box-shadow: 0 0 20px var(--accent-glow);
+        }
+
+        /* Feedback de erro */
+        .btn-response.error {
+            border-color: var(--danger);
+            background: rgba(244, 63, 94, 0.12);
+            box-shadow: 0 0 20px var(--danger-glow);
+        }
+
+        .btn-response .emoji {
+            font-size: 1.7rem;
             filter: drop-shadow(0 4px 6px rgba(0,0,0,0.2));
             transition: transform 0.2s ease;
         }
-        
-        .btn-response:active .emoji {
-            transform: scale(1.1);
-        }
 
-        /* ── BUTTONS (Action) ── */
+        .btn-response:not(:disabled):active .emoji { transform: scale(1.1); }
+
+        /* ── ACTION BUTTONS ── */
         .btn-action {
             width: 100%;
-            padding: 16px;
+            padding: 15px;
             border-radius: 100px;
             border: none;
             font-family: inherit;
-            font-size: 1.1rem;
+            font-size: 1rem;
             font-weight: 600;
             color: white;
             cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            display: flex; align-items: center; justify-content: center;
             gap: 10px;
             transition: all 0.25s ease;
         }
 
-        .btn-answer {
-            background: var(--accent);
-            box-shadow: 0 8px 25px var(--accent-glow);
-        }
+        .btn-answer { background: var(--accent); box-shadow: 0 8px 25px var(--accent-glow); }
         .btn-answer:active { transform: scale(0.97); }
 
         .btn-dismiss {
@@ -294,23 +299,75 @@
             color: var(--danger);
             box-shadow: 0 4px 12px rgba(0,0,0,0.1);
         }
-        .btn-dismiss:active { 
-            background: rgba(244, 63, 94, 0.1);
-            border-color: var(--danger);
-            transform: scale(0.97); 
+        .btn-dismiss:active { background: rgba(244,63,94,0.1); border-color: var(--danger); transform: scale(0.97); }
+
+        /* ── PUSH BUTTON ── */
+        .btn-push {
+            background: none;
+            border: 1px solid var(--primary);
+            color: var(--primary);
+            padding: 9px 18px;
+            border-radius: 20px;
+            font-size: 0.78rem;
+            font-family: inherit;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex; align-items: center; gap: 6px;
+            transition: all 0.2s ease;
+            letter-spacing: 0.03em;
         }
+        .btn-push:active { transform: scale(0.95); }
+        .btn-push.active {
+            background: rgba(99,102,241,0.15);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .btn-push.unsupported { opacity: 0.4; cursor: default; border-color: #475569; color: #475569; }
+
+        /* ── TOAST FEEDBACK ── */
+        #toast {
+            position: fixed;
+            bottom: 90px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: var(--bg-surface-elevated);
+            border: 1px solid var(--border-light);
+            backdrop-filter: blur(20px);
+            border-radius: 16px;
+            padding: 12px 20px;
+            font-size: 0.85rem;
+            color: var(--text-main);
+            z-index: 999;
+            pointer-events: none;
+            opacity: 0;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            white-space: nowrap;
+            max-width: 90vw;
+            text-align: center;
+        }
+        #toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+        #toast.success { border-color: var(--accent); }
+        #toast.error   { border-color: var(--danger); }
 
         /* ── FOOTER ── */
-        .footer-actions {
-            padding: 20px;
-            z-index: 10;
+        .footer-actions { padding: 16px; z-index: 10; }
+        .footer-tools {
+            text-align: center;
+            padding: 0 0 16px 0;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
         }
 
-        /* Overlay for Initial Setup */
+        /* ── INIT OVERLAY ── */
         #init-overlay {
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(11, 14, 20, 0.95);
+            background: rgba(11, 14, 20, 0.96);
             backdrop-filter: blur(20px);
             z-index: 1000;
             display: flex;
@@ -322,30 +379,29 @@
         }
 
         #init-overlay h2 {
-            font-size: 2rem;
+            font-size: 1.9rem;
             background: linear-gradient(135deg, var(--text-main), var(--text-muted));
             -webkit-background-clip: text;
             background-clip: text;
             -webkit-text-fill-color: transparent;
             margin-bottom: 10px;
         }
-        
+
         #init-overlay p {
             color: var(--text-muted);
             margin-bottom: 30px;
-            line-height: 1.5;
+            line-height: 1.6;
+            font-size: 0.95rem;
         }
 
         .btn-start {
             background: var(--primary);
-            color: white;
-            border: none;
-            padding: 16px 36px;
-            border-radius: 100px;
-            font-size: 1.1rem;
-            font-weight: 600;
+            color: white; border: none;
+            padding: 16px 36px; border-radius: 100px;
+            font-size: 1.1rem; font-weight: 600;
             box-shadow: 0 10px 30px var(--primary-glow);
             transition: transform 0.2s ease;
+            cursor: pointer;
         }
         .btn-start:active { transform: scale(0.95); }
 
@@ -360,15 +416,21 @@
     </div>
 
     <div class="header">
-        <h1>PORTÃO EXECUTIVO <span style="font-size: 0.6rem; opacity: 0.5; vertical-align: middle;">V3</span></h1>
-        <div class="status-badge">
-            <div id="online-dot" class="dot"></div>
-            <span id="status-text">Conectando...</span>
+        <h1>PORTÃO EXECUTIVO <span style="font-size:0.55rem; opacity:0.45; vertical-align:middle;">V4</span></h1>
+        <div class="badges-row">
+            <div class="status-badge">
+                <div id="online-dot" class="dot"></div>
+                <span id="status-text">Conectando...</span>
+            </div>
+            <div class="status-badge" id="push-badge" style="display:none;">
+                <div class="dot push-active"></div>
+                <span>Push Ativo</span>
+            </div>
         </div>
     </div>
 
     <div class="main-content">
-        
+
         <div id="ringing-card" class="ringing-card">
             <div class="avatar-circle">📞</div>
             <h3>Chamada do Interfone</h3>
@@ -384,11 +446,11 @@
 
         <h4 class="responses-heading">Respostas Rápidas</h4>
         <div class="responses-grid">
-            <button class="btn-response" onclick="sendResponse('descendo')">
+            <button id="btn-descendo" class="btn-response" onclick="sendResponse(this, 'descendo')">
                 <span class="emoji">🏃</span>
                 <span>Estou descendo</span>
             </button>
-            <button class="btn-response" onclick="sendResponse('ausente')">
+            <button id="btn-ausente" class="btn-response" onclick="sendResponse(this, 'ausente')">
                 <span class="emoji">🚫</span>
                 <span>Não estou</span>
             </button>
@@ -400,89 +462,237 @@
         <button class="btn-action btn-dismiss" onclick="dismissCall()">Dispensar Chamada</button>
     </div>
 
+    <div class="footer-tools">
+        <button id="btn-push" class="btn-push" onclick="togglePushSubscription()">
+            🔔 Ativar Chamada de Fundo
+        </button>
+        <button onclick="testSound()" style="background:none; border:1px solid var(--border-light); color:var(--text-muted); padding:9px 16px; border-radius:20px; font-size:0.78rem; cursor:pointer; font-family:inherit;">
+            🔊 Testar Som
+        </button>
+    </div>
+
+    <div id="toast"></div>
+
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
     <script>
         let socket;
         let isAppStarted = false;
         let audioCtx;
         let ringInterval = null;
+        let pushSubscription = null;
+        let vapidPublicKey = null;
 
-        // ── Gera som de campainha potente ──
+        // ── TOAST FEEDBACK ──
+        let toastTimer = null;
+        function showToast(msg, type = '') {
+            const toast = document.getElementById('toast');
+            toast.textContent = msg;
+            toast.className = 'show ' + type;
+            if (toastTimer) clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => { toast.className = ''; }, 3500);
+        }
+
+        // ── CAMPAINHA (Audio API) ──
         function startRingTone() {
             if (ringInterval) return;
-            
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             if (audioCtx.state === 'suspended') audioCtx.resume();
-            
+
             function playBurst() {
                 const osc = audioCtx.createOscillator();
                 const gain = audioCtx.createGain();
                 osc.connect(gain);
                 gain.connect(audioCtx.destination);
-                
-                // Usando 'square' para ser mais ruidoso e audível que 'sine'
-                osc.type = 'triangle'; 
-                osc.frequency.setValueAtTime(880, audioCtx.currentTime); // Lá
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(880, audioCtx.currentTime);
                 osc.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.5);
-                
-                gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.6, audioCtx.currentTime);
                 gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
-                
                 osc.start(audioCtx.currentTime);
                 osc.stop(audioCtx.currentTime + 0.5);
             }
-            
+
             playBurst();
             ringInterval = setInterval(playBurst, 800);
         }
 
         function stopRingTone() {
-            if (ringInterval) {
-                clearInterval(ringInterval);
-                ringInterval = null;
-            }
+            if (ringInterval) { clearInterval(ringInterval); ringInterval = null; }
         }
 
         function testSound() {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             audioCtx.resume().then(() => {
                 startRingTone();
-                setTimeout(stopRingTone, 2000);
-                alert("Se você ouviu o som, o áudio está funcionando!");
+                setTimeout(stopRingTone, 2500);
             });
         }
 
-        function sendNotification(title, body) {
+        // ── NOTIFICAÇÃO (fallback SW quando app está em background leve) ──
+        function sendLocalNotification(title, body) {
             if (Notification.permission === 'granted') {
                 try {
                     new Notification(title, {
-                        body: body,
-                        icon: 'https://cdn-icons-png.flaticon.com/512/1211/1211477.png',
-                        vibrate: [500, 100, 500],
+                        body, icon: 'https://cdn-icons-png.flaticon.com/512/1211/1211477.png',
                         tag: 'interfone-ring'
                     });
                 } catch(e) {
-                    if (navigator.serviceWorker && navigator.serviceWorker.ready) {
-                        navigator.serviceWorker.ready.then(reg => {
-                            reg.showNotification(title, { body: body, tag: 'interfone-ring' });
-                        });
-                    }
+                    navigator.serviceWorker?.ready.then(reg => {
+                        reg.showNotification(title, { body, tag: 'interfone-ring', vibrate: [500,200,500] });
+                    });
                 }
             }
         }
 
-        function initApp() {
+        // ── WEB PUSH ──────────────────────────────────────────────────────
+
+        function urlBase64ToUint8Array(base64String) {
+            const padding = '='.repeat((4 - base64String.length % 4) % 4);
+            const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+            const rawData = window.atob(base64);
+            return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+        }
+
+        async function loadVapidKey() {
+            try {
+                const resp = await fetch('/api/vapid-public-key');
+                const json = await resp.json();
+                vapidPublicKey = json.publicKey;
+            } catch(e) {
+                console.warn('[PUSH] Não foi possível carregar a chave VAPID:', e);
+            }
+        }
+
+        async function togglePushSubscription() {
+            if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+                showToast('❌ Seu navegador não suporta notificações push.', 'error');
+                return;
+            }
+
+            // Se já subscrito, cancela
+            if (pushSubscription) {
+                await unsubscribePush();
+                return;
+            }
+
+            // Pedir permissão de notificação
+            const permission = await Notification.requestPermission();
+            if (permission !== 'granted') {
+                showToast('❌ Permissão de notificação negada.', 'error');
+                return;
+            }
+
+            await subscribePush();
+        }
+
+        async function subscribePush() {
+            try {
+                if (!vapidPublicKey) await loadVapidKey();
+                if (!vapidPublicKey) {
+                    showToast('❌ Chave VAPID não configurada no servidor.', 'error');
+                    return;
+                }
+
+                const reg = await navigator.serviceWorker.ready;
+                const sub = await reg.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
+                });
+
+                // Enviar subscription ao servidor
+                const resp = await fetch('/api/subscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(sub.toJSON())
+                });
+                const result = await resp.json();
+
+                if (result.ok) {
+                    pushSubscription = sub;
+                    updatePushUI(true);
+                    showToast('✅ Notificações ativadas! Você será avisado mesmo com a tela apagada.', 'success');
+                    // Salvar no localStorage para restaurar na próxima visita
+                    localStorage.setItem('push_endpoint', sub.endpoint);
+                } else {
+                    showToast('❌ Erro ao ativar notificações no servidor.', 'error');
+                }
+            } catch(e) {
+                console.error('[PUSH] Erro ao subscrever:', e);
+                showToast('❌ Erro ao ativar notificações: ' + e.message, 'error');
+            }
+        }
+
+        async function unsubscribePush() {
+            try {
+                if (pushSubscription) {
+                    const endpoint = pushSubscription.endpoint;
+                    await pushSubscription.unsubscribe();
+                    await fetch('/api/subscribe', {
+                        method: 'DELETE',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ endpoint })
+                    });
+                    pushSubscription = null;
+                    localStorage.removeItem('push_endpoint');
+                }
+                updatePushUI(false);
+                showToast('🔕 Notificações desativadas.', '');
+            } catch(e) {
+                showToast('Erro ao desativar notificações.', 'error');
+            }
+        }
+
+        function updatePushUI(active) {
+            const btn = document.getElementById('btn-push');
+            const badge = document.getElementById('push-badge');
+            if (active) {
+                btn.textContent = '🔕 Desativar Chamada de Fundo';
+                btn.classList.add('active');
+                badge.style.display = 'flex';
+            } else {
+                btn.textContent = '🔔 Ativar Chamada de Fundo';
+                btn.classList.remove('active');
+                badge.style.display = 'none';
+            }
+        }
+
+        async function restorePushSubscription() {
+            // Verifica se o usuário já tinha subscrito antes
+            const savedEndpoint = localStorage.getItem('push_endpoint');
+            if (!savedEndpoint || !('serviceWorker' in navigator)) return;
+            try {
+                const reg = await navigator.serviceWorker.ready;
+                const sub = await reg.pushManager.getSubscription();
+                if (sub && sub.endpoint === savedEndpoint) {
+                    pushSubscription = sub;
+                    updatePushUI(true);
+                    console.log('[PUSH] Subscription restaurada.');
+                } else {
+                    // Subscription expirou ou mudou
+                    localStorage.removeItem('push_endpoint');
+                }
+            } catch(e) {
+                console.warn('[PUSH] Erro ao restaurar subscription:', e);
+            }
+        }
+
+        // ── INIT APP ──
+        async function initApp() {
             document.getElementById('init-overlay').style.display = 'none';
             isAppStarted = true;
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             audioCtx.resume();
-            
+
             if ('Notification' in window && Notification.permission === 'default') {
                 Notification.requestPermission();
             }
+
             setupSocket();
+            await loadVapidKey();
+            await restorePushSubscription();
         }
 
+        // ── SOCKET.IO ──
         function setupSocket() {
             socket = io({ transports: ['websocket'], upgrade: false });
 
@@ -491,11 +701,16 @@
                 document.getElementById('status-text').innerText = 'Online';
             });
 
+            socket.on('disconnect', () => {
+                document.getElementById('online-dot').classList.remove('online');
+                document.getElementById('status-text').innerText = 'Reconectando...';
+            });
+
             socket.on('intercom_ring', (data) => {
                 document.getElementById('ringing-card').classList.add('active');
                 if (audioCtx) audioCtx.resume();
                 startRingTone();
-                sendNotification('🔔 Interfone!', 'Alguém no portão.');
+                sendLocalNotification('🔔 Interfone!', 'Alguém no portão.');
                 if (navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 500]);
                 document.getElementById('transcription-text').innerHTML = '<span class="empty-state">Visitante no portão...</span>';
             });
@@ -503,14 +718,18 @@
             socket.on('intercom_status', (data) => {
                 if (data.message) document.getElementById('status-text').innerText = data.message;
                 const transcriptEl = document.getElementById('transcription-text');
-                
+
                 if (data.status === 'recording') {
                     transcriptEl.innerHTML = '<span style="color:var(--accent)">🎙️ Ouvindo visitante...</span>';
                 } else if (data.status === 'transcribing') {
                     transcriptEl.innerHTML = '<span style="color:var(--primary)">🧠 Entendendo o que foi dito...</span>';
-                } else if (data.status === 'idle') {
+                } else if (data.status === 'idle' || data.status === 'offline') {
                     stopRingTone();
                     document.getElementById('ringing-card').classList.remove('active');
+                    if (data.status === 'offline') {
+                        document.getElementById('online-dot').classList.remove('online');
+                        document.getElementById('status-text').innerText = 'Interfone offline';
+                    }
                 }
             });
 
@@ -519,11 +738,27 @@
                 document.getElementById('ringing-card').classList.remove('active');
                 const transcriptEl = document.getElementById('transcription-text');
                 if (data.text) {
-                    transcriptEl.innerHTML = '<div style="font-size:1.4rem; color:white; font-weight:600;">🗣️ "' + data.text + '"</div>';
-                    sendNotification('🗣️ Visitante:', data.text);
+                    transcriptEl.innerHTML = '<div style="font-size:1.35rem; color:white; font-weight:600;">🗣️ "' + data.text + '"</div>';
+                    sendLocalNotification('🗣️ Visitante:', data.text);
                 } else {
                     transcriptEl.innerHTML = '<span class="empty-state">O visitante não falou nada.</span>';
                 }
+            });
+
+            // ── ACK das respostas rápidas ──
+            socket.on('response_ack', (data) => {
+                if (data.ok) {
+                    showToast('✅ ' + (data.label || 'Resposta enviada!'), 'success');
+                } else {
+                    showToast('❌ ' + (data.error || 'Falha ao enviar resposta.'), 'error');
+                    if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+                }
+                // Re-habilitar todos os botões de resposta
+                document.querySelectorAll('.btn-response').forEach(btn => {
+                    btn.disabled = false;
+                    // Limpa feedback visual após 2s
+                    setTimeout(() => { btn.classList.remove('success', 'error'); }, 2000);
+                });
             });
         }
 
@@ -533,28 +768,33 @@
             if (audioCtx) audioCtx.resume();
         }
 
-        function sendResponse(key) {
+        function sendResponse(btnEl, key) {
+            if (btnEl.disabled) return;
+
+            // Feedback imediato: desabilita todos os botões por segurança
+            document.querySelectorAll('.btn-response').forEach(b => { b.disabled = true; });
+
             answerCall();
             socket.emit('quick_response', { response: key });
             document.getElementById('status-text').innerText = 'Enviando...';
+            showToast('⏳ Enviando resposta ao interfone...', '');
         }
 
         function dismissCall() {
             socket.emit('dismiss_call', {});
             answerCall();
+            showToast('Chamada dispensada.', '');
         }
 
+        // ── SERVICE WORKER ──
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js');
+                navigator.serviceWorker.register('/sw.js').then(reg => {
+                    console.log('[SW] Registered:', reg.scope);
+                });
             });
         }
     </script>
-    <div style="text-align:center; padding-bottom: 20px;">
-        <button onclick="testSound()" style="background:none; border:1px solid var(--border-light); color:var(--text-muted); padding:8px 16px; border-radius:20px; font-size:0.8rem; cursor:pointer;">
-            🔊 Testar Som da Campainha
-        </button>
-    </div>
 
 </body>
 </html>

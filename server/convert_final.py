@@ -26,10 +26,13 @@ def generate_beep():
     sample_rate = 24000
     amp = 20000.0
     pcm = bytearray()
-    pcm.extend(bytes(8000))
-    # Beep (1000 Hz) for 0.3s
-    for i in range(int(sample_rate * 0.3)):
-        pcm.extend(struct.pack('<h', int(amp * math.sin(2 * math.pi * 1000.0 * i / sample_rate))))
+    
+    # 5 beeps espaçados para simular "chamando residente"
+    for _ in range(5):
+        pcm.extend(bytes(int(sample_rate * 0.8 * 2))) # silencio
+        for i in range(int(sample_rate * 0.3)):       # beep
+            pcm.extend(struct.pack('<h', int(amp * math.sin(2 * math.pi * 1000.0 * i / sample_rate))))
+            
     return bytes(pcm)
 
 def convert_to_pcm(input_path, sample_rate, volume=2.2):

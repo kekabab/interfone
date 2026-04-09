@@ -2,7 +2,7 @@
 Servidor do Interfone AI - FastAPI + WebSocket + Socket.IO
 - Recebe áudio do ESP32 via WebSocket
 - Transcreve com Whisper
-- Notifica o App PWA dos moradores via Socket.IO
+- Notifica o App PWA dos moradores via Socket.IO e Web Push
 - Envia respostas de áudio de volta ao ESP32
 """
 import asyncio
@@ -12,11 +12,19 @@ import json
 import struct
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 import socketio
 from openai import AsyncOpenAI
+
+# ── Web Push ───────────────────────────────────────────────────
+try:
+    from pywebpush import webpush, WebPushException
+    WEBPUSH_AVAILABLE = True
+except ImportError:
+    WEBPUSH_AVAILABLE = False
+    print("[WARN] pywebpush não instalado. Notificações push desativadas.")
 
 # ── Configuração ──────────────────────────────────────────────
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
@@ -24,6 +32,14 @@ client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
 AUDIO_DIR = Path(__file__).parent
 STATIC_DIR = Path(__file__).parent / "static"
+
+# ── VAPID Keys (variáveis de ambiente no Render) ───────────────
+# Para gerar as chaves, execute 1x localmente:
+#   pip install pywebpush
+#   python -c "from pywebpush import Vapid; v=Vapid(); v.generate_keys(); print('PRIVATE:', v.private_key); print('PUBLIC:', v.public_key)"
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
+VAPID_PUBLIC_KEY  = os.environ.get("VAPID_PUBLIC_KEY", "")
+VAPID_EMAIL       = os.environ.get("VAPID_EMAIL", "mailto:admin@interfone.local")
 
 # ── Respostas Rápidas (mapeadas para arquivos de áudio .raw) ──
 QUICK_RESPONSES = {
@@ -50,6 +66,8 @@ class IntercomState:
         self.last_audio_time: float = 0.0
         self.audio_cache: dict[str, bytes] = {}  # Cache de áudios pré-carregados
         self.call_timeout_task: asyncio.Task | None = None  # Task de timeout da chamada
+        self.push_subscriptions: list[dict] = []  # Subscriptions Web Push dos moradores
+        self.response_lock = asyncio.Lock()  # Evita double-send simultâneo
 
     def load_audio_cache(self):
         """Carrega todos os arquivos .raw associados às respostas rápidas."""
@@ -67,7 +85,7 @@ state.load_audio_cache()
 
 # ── Socket.IO (para o App PWA dos moradores) ──────────────────
 sio = socketio.AsyncServer(
-    async_mode="asgi", 
+    async_mode="asgi",
     cors_allowed_origins="*",
     ping_timeout=60,    # 60 segundos de tolerância
     ping_interval=25    # Pings a cada 25 segundos
@@ -112,6 +130,83 @@ async def api_status():
 @app.get("/api/responses")
 async def api_responses():
     return {k: {"label": v["label"], "text": v["text"]} for k, v in QUICK_RESPONSES.items()}
+
+
+@app.get("/api/vapid-public-key")
+async def vapid_public_key():
+    """Retorna a chave pública VAPID para o frontend subscrever ao Push."""
+    return JSONResponse({"publicKey": VAPID_PUBLIC_KEY})
+
+
+@app.post("/api/subscribe")
+async def push_subscribe(request: Request):
+    """Recebe e salva a subscription Push do browser do morador."""
+    try:
+        sub = await request.json()
+        # Evitar duplicatas (mesmo endpoint)
+        endpoint = sub.get("endpoint", "")
+        state.push_subscriptions = [s for s in state.push_subscriptions if s.get("endpoint") != endpoint]
+        state.push_subscriptions.append(sub)
+        print(f"[PUSH] Nova subscription salva. Total: {len(state.push_subscriptions)}")
+        return JSONResponse({"ok": True, "total": len(state.push_subscriptions)})
+    except Exception as e:
+        print(f"[PUSH] Erro ao salvar subscription: {e}")
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+@app.delete("/api/subscribe")
+async def push_unsubscribe(request: Request):
+    """Remove a subscription Push do morador."""
+    try:
+        body = await request.json()
+        endpoint = body.get("endpoint", "")
+        before = len(state.push_subscriptions)
+        state.push_subscriptions = [s for s in state.push_subscriptions if s.get("endpoint") != endpoint]
+        print(f"[PUSH] Subscription removida. {before} → {len(state.push_subscriptions)}")
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
+
+
+# ── Web Push Helper ───────────────────────────────────────────
+async def send_push_notifications(title: str, body: str):
+    """Envia notificação Push para todos os moradores, mesmo com app fechado."""
+    if not WEBPUSH_AVAILABLE or not VAPID_PRIVATE_KEY:
+        print("[PUSH] Skipping push: pywebpush não disponível ou chave não configurada.")
+        return
+
+    if not state.push_subscriptions:
+        print("[PUSH] Sem subscriptions ativas.")
+        return
+
+    payload = json.dumps({"title": title, "body": body})
+    dead_subscriptions = []
+
+    for sub in state.push_subscriptions:
+        try:
+            # pywebpush espera a chave PEM com quebras de linha reais
+            vapid_key = VAPID_PRIVATE_KEY.replace("\\n", "\n")
+            await asyncio.to_thread(
+                webpush,
+                subscription_info=sub,
+                data=payload,
+                vapid_private_key=vapid_key,
+                vapid_claims={"sub": VAPID_EMAIL},
+                content_encoding="aes128gcm",
+            )
+            print(f"[PUSH] ✓ Notificação enviada para {sub.get('endpoint', 'unknown')[:50]}...")
+        except WebPushException as ex:
+            print(f"[PUSH] ✗ Erro ao enviar push: {ex}")
+            # Se a subscription expirou (410 Gone), remove
+            if ex.response and ex.response.status_code in (404, 410):
+                dead_subscriptions.append(sub.get("endpoint"))
+        except Exception as ex:
+            print(f"[PUSH] ✗ Erro inesperado: {ex}")
+
+    # Limpar subscriptions mortas
+    if dead_subscriptions:
+        state.push_subscriptions = [s for s in state.push_subscriptions if s.get("endpoint") not in dead_subscriptions]
+        print(f"[PUSH] {len(dead_subscriptions)} subscription(s) expirada(s) removida(s).")
 
 
 # ── Whisper Transcription ─────────────────────────────────────
@@ -205,7 +300,15 @@ async def esp32_websocket(websocket: WebSocket):
                         state.call_timeout_task.cancel()
                     # Inicia timeout de 40 segundos para esta sessão
                     state.call_timeout_task = asyncio.create_task(call_timeout(40))
+
+                    # 1. Notifica via Socket.IO (app aberto ou em background recente)
                     await sio.emit("intercom_ring", {"timestamp": state.ring_start_time})
+
+                    # 2. Notifica via Web Push (app fechado, tela apagada)
+                    asyncio.create_task(send_push_notifications(
+                        "🔔 Alguém no Interfone!",
+                        "Toque para ver quem está no portão."
+                    ))
 
                 elif msg == "AUDIO_START":
                     state.accumulated_audio = bytearray()
@@ -229,19 +332,18 @@ async def esp32_websocket(websocket: WebSocket):
                         except Exception as e:
                             print(f"[ERROR] Falha na transcrição: {e}")
                             await sio.emit("intercom_transcript", {"text": "", "message": "Erro na transcrição"})
-                            
+
                         state.status = "waiting_response"
                         await sio.emit("intercom_status", {"status": "waiting_response", "message": "Aguardando sua resposta..."})
 
             elif "bytes" in data:
                 state.accumulated_audio.extend(data["bytes"])
                 state.last_audio_time = time.time()
-                
+
                 # Se acumulamos muito áudio (ex: > 15s), podemos ter perdido o AUDIO_END
                 # 8000Hz * 2 bytes * 15s = 240.000 bytes
                 if len(state.accumulated_audio) > 240000:
                    print("[DEBUG] Buffer de áudio muito grande, forçando transcrição...")
-                   # Aqui poderíamos disparar a transcrição se necessário
 
     except WebSocketDisconnect:
         print("[-] ESP32 desconectado normalmente.")
@@ -277,57 +379,88 @@ async def quick_response(sid, data):
 
     if response_key not in QUICK_RESPONSES:
         print(f"[APP] Resposta desconhecida: {response_key}")
+        await sio.emit("response_ack", {"ok": False, "error": "Resposta desconhecida"}, to=sid)
         return
 
-    resp = QUICK_RESPONSES[response_key]
-    state.status = "playing_response"
+    # Verificar se o ESP32 está conectado ANTES de tentar enviar
+    if not state.esp32_ws:
+        print("[APP] ESP32 desconectado! Não é possível enviar resposta.")
+        await sio.emit("response_ack", {
+            "ok": False,
+            "error": "Interfone offline. Reconecte o ESP32."
+        }, to=sid)
+        return
 
-    await sio.emit("intercom_status", {
-        "status": "playing_response",
-        "message": f"Tocando: {resp['label']}",
-    })
+    # Lock para evitar que dois moradores enviem resposta simultaneamente
+    if state.response_lock.locked():
+        print("[APP] Outro áudio já está sendo enviado. Aguardando...")
+        await sio.emit("response_ack", {
+            "ok": False,
+            "error": "Aguarde, outro áudio está sendo reproduzido."
+        }, to=sid)
+        return
 
-    # Enviar áudio de resposta para o ESP32
-    audio_file = resp["audio_file"]
-    if audio_file in state.audio_cache:
-        audio_data = state.audio_cache[audio_file]
-        print(f"[AUDIO] Enviando {audio_file} (da memória) para o ESP32...")
-        if state.esp32_ws:
+    async with state.response_lock:
+        resp = QUICK_RESPONSES[response_key]
+        state.status = "playing_response"
+
+        await sio.emit("intercom_status", {
+            "status": "playing_response",
+            "message": f"Tocando: {resp['label']}",
+        })
+
+        # Enviar áudio de resposta para o ESP32
+        audio_file = resp["audio_file"]
+        if audio_file in state.audio_cache:
+            audio_data = state.audio_cache[audio_file]
+            print(f"[AUDIO] Enviando {audio_file} (da memória) para o ESP32...")
             try:
                 start_time = time.time()
+
+                # Pequeno delay para garantir que pipeline anterior foi finalizado
+                await asyncio.sleep(0.2)
+
                 # Enviar comando com sample rate (8000 para respostas rápidas)
                 await state.esp32_ws.send_text(f"PLAY_RESPONSE:8000:{audio_file}")
-                
-                # Aumentamos pausa para o ESP32 abrir o pipeline com segurança
+
+                # Pausa para o ESP32 abrir o pipeline com segurança
                 await asyncio.sleep(0.4)
-                
-                # Enviar 400ms de silêncio para dar tempo de o DAC/Amplificador desmutar antes do "Certo..."
+
+                # Enviar 400ms de silêncio para dar tempo de o DAC/Amplificador desmutar
                 # 8000 samples/sec * 2 bytes/sample * 0.4s = 6400 bytes
                 await state.esp32_ws.send_bytes(bytes(6400))
-                
+
                 # Enviar dados binários do áudio em chunks
                 chunk_size = 4096
                 for i in range(0, len(audio_data), chunk_size):
                     chunk = audio_data[i:i + chunk_size]
                     await state.esp32_ws.send_bytes(chunk)
-                
-                # CÁLCULO DE TEMPO: Áudio PCM 16-bit 8000Hz = 16.000 bytes consumidos por segundo.
-                # Se não esperarmos o áudio terminar de tocar, o "PLAY_DONE" chega antes da hora no ESP32 e corta a fala!
+
+                # Esperar duração do áudio + margem
+                # PCM 16-bit 8000Hz = 16.000 bytes por segundo
                 duration = len(audio_data) / 16000.0
                 print(f"[AUDIO] Aguardando o buffer tocar no ESP32 por {duration:.2f}s...")
-                await asyncio.sleep(duration + 0.5) # Espera a duração do áudio + meio segundo de margem
-                
+                await asyncio.sleep(duration + 0.5)
+
                 await state.esp32_ws.send_text("PLAY_DONE")
                 elapsed = (time.time() - start_time) * 1000
                 print(f"[AUDIO] Playback finalizado em {elapsed:.2f}ms. Total: {len(audio_data)} bytes")
+
+                # ✅ Confirmar sucesso para o PWA
+                await sio.emit("response_ack", {"ok": True, "label": resp["label"]}, to=sid)
+
             except Exception as e:
                 print(f"[AUDIO] Erro ao enviar: {e}")
-    else:
-        print(f"[AUDIO] Arquivo não cacheado: {audio_file}")
-        # Tentar gerar via TTS como fallback
-        print(f"[TTS] Gerando áudio TTS como fallback...")
-        if state.esp32_ws:
-            await state.esp32_ws.send_text(f"TTS:{resp['text']}")
+                await sio.emit("response_ack", {
+                    "ok": False,
+                    "error": f"Erro ao enviar áudio: {str(e)}"
+                }, to=sid)
+        else:
+            print(f"[AUDIO] Arquivo não cacheado: {audio_file}")
+            # Tentar gerar via TTS como fallback
+            if state.esp32_ws:
+                await state.esp32_ws.send_text(f"TTS:{resp['text']}")
+            await sio.emit("response_ack", {"ok": True, "label": resp["label"] + " (TTS)"}, to=sid)
 
     state.status = "waiting_response"
     await sio.emit("intercom_status", {"status": "waiting_response", "message": "Resposta enviada! Pode enviar outra."})
@@ -346,7 +479,7 @@ if __name__ == "__main__":
     import uvicorn
     print("=" * 60)
     print("  INTERFONE AI - Servidor Local")
-    print("  PWA: http://<SEU_IP>:8765")
-    print("  ESP32 WS: ws://<SEU_IP>:8765/ws/esp32")
+    print(f"  PWA: http://<SEU_IP>:8765")
+    print(f"  ESP32 WS: ws://<SEU_IP>:8765/ws/esp32")
     print("=" * 60)
     uvicorn.run(sio_app, host="0.0.0.0", port=8765, log_level="info")

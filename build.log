@@ -1,0 +1,39 @@
+[1/8] Performing build step for 'bootloader'
+ninja: no work to do.
+[2/6] Building C object esp-idf/main/CMakeFiles/__idf_main.dir/app_main.c.obj
+../main/app_main.c: In function 'recorder_pipeline_open':
+../main/app_main.c:58:5: warning: 'I2S_COMM_FORMAT_I2S' is deprecated [-Wdeprecated-declarations]
+     i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
+     ^~~~~~~~~~~~~~~~
+In file included from D:/esp/.espressif/frameworks/esp-idf-v4.2.5/components/soc/src/esp32/include/hal/i2s_ll.h:32,
+                 from D:/esp/.espressif/frameworks/esp-idf-v4.2.5/components/soc/include/hal/i2s_hal.h:28,
+                 from D:/esp/.espressif/frameworks/esp-idf-v4.2.5/components/driver/include/driver/i2s.h:24,
+                 from ../main/app_main.c:7:
+D:/esp/.espressif/frameworks/esp-idf-v4.2.5/components/soc/include/hal/i2s_types.h:70:5: note: declared here
+     I2S_COMM_FORMAT_I2S       __attribute__((deprecated)) = 0x01, /*!< I2S communication format I2S, correspond to `I2S_COMM_FORMAT_STAND_I2S`*/
+     ^~~~~~~~~~~~~~~~~~~
+../main/app_main.c: In function 'player_pipeline_open':
+../main/app_main.c:103:5: warning: 'I2S_COMM_FORMAT_I2S' is deprecated [-Wdeprecated-declarations]
+     i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
+     ^~~~~~~~~~~~~~~~
+In file included from D:/esp/.espressif/frameworks/esp-idf-v4.2.5/components/soc/src/esp32/include/hal/i2s_ll.h:32,
+                 from D:/esp/.espressif/frameworks/esp-idf-v4.2.5/components/soc/include/hal/i2s_hal.h:28,
+                 from D:/esp/.espressif/frameworks/esp-idf-v4.2.5/components/driver/include/driver/i2s.h:24,
+                 from ../main/app_main.c:7:
+D:/esp/.espressif/frameworks/esp-idf-v4.2.5/components/soc/include/hal/i2s_types.h:70:5: note: declared here
+     I2S_COMM_FORMAT_I2S       __attribute__((deprecated)) = 0x01, /*!< I2S communication format I2S, correspond to `I2S_COMM_FORMAT_STAND_I2S`*/
+     ^~~~~~~~~~~~~~~~~~~
+[3/6] Linking CXX static library esp-idf\main\libmain.a
+[4/6] Generating ld/esp32.project.ld
+[5/6] Linking CXX executable esp32-ai-intercom.elf
+[6/6] Generating binary image from built executable
+esptool.py v3.1-dev
+Merged 2 ELF sections
+Generated C:/Users/kekab/.gemini/antigravity/scratch/esp32-ai-intercom/build/esp32-ai-intercom.bin
+Executing action: all (aliases: build)
+Running ninja in directory c:\users\kekab\.gemini\antigravity\scratch\esp32-ai-intercom\build
+Executing "ninja all"...
+
+Project build complete. To flash, run this command:
+D:\esp\.espressif\python_env\idf4.2_py3.11_env\Scripts\python.exe D:\esp\.espressif\frameworks\esp-idf-v4.2.5\components\esptool_py\esptool\esptool.py -p (PORT) -b 460800 --before default_reset --after hard_reset --chip esp32  write_flash --flash_mode dio --flash_size detect --flash_freq 40m 0x1000 build\bootloader\bootloader.bin 0x8000 build\partition_table\partition-table.bin 0x10000 build\esp32-ai-intercom.bin
+or run 'idf.py -p (PORT) flash'

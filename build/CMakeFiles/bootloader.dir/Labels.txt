@@ -1,0 +1,13 @@
+# Target labels
+ bootloader
+# Source files and their labels
+C:/Users/kekab/.gemini/antigravity/scratch/esp32-ai-intercom/build/CMakeFiles/bootloader
+C:/Users/kekab/.gemini/antigravity/scratch/esp32-ai-intercom/build/CMakeFiles/bootloader.rule
+C:/Users/kekab/.gemini/antigravity/scratch/esp32-ai-intercom/build/CMakeFiles/bootloader-complete.rule
+C:/Users/kekab/.gemini/antigravity/scratch/esp32-ai-intercom/build/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule
+C:/Users/kekab/.gemini/antigravity/scratch/esp32-ai-intercom/build/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule
+C:/Users/kekab/.gemini/antigravity/scratch/esp32-ai-intercom/build/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule
+C:/Users/kekab/.gemini/antigravity/scratch/esp32-ai-intercom/build/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule
+C:/Users/kekab/.gemini/antigravity/scratch/esp32-ai-intercom/build/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule
+C:/Users/kekab/.gemini/antigravity/scratch/esp32-ai-intercom/build/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule
+C:/Users/kekab/.gemini/antigravity/scratch/esp32-ai-intercom/build/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule
