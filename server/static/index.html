@@ -791,6 +791,44 @@
             window.addEventListener('load', () => {
                 navigator.serviceWorker.register('/sw.js').then(reg => {
                     console.log('[SW] Registered:', reg.scope);
+
+                    // Se já tem um SW novo esperando (ex: app aberto há muito tempo),
+                    // manda ele pular a fila e ativar agora
+                    if (reg.waiting) {
+                        reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+                    }
+
+                    // Quando um novo SW terminar de instalar e ficar "waiting"
+                    reg.addEventListener('updatefound', () => {
+                        const newWorker = reg.installing;
+                        newWorker.addEventListener('statechange', () => {
+                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                                // Novo SW instalado — manda ativar imediatamente
+                                newWorker.postMessage({ type: 'SKIP_WAITING' });
+                            }
+                        });
+                    });
+                });
+
+                // Quando o SW ativo mudar (novo tomou controle), recarrega a página
+                let refreshing = false;
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                    if (!refreshing) {
+                        refreshing = true;
+                        console.log('[SW] Novo service worker ativo — recarregando...');
+                        window.location.reload();
+                    }
+                });
+
+                // Escuta mensagem SW_UPDATED enviada pelo SW após ativar
+                navigator.serviceWorker.addEventListener('message', (event) => {
+                    if (event.data && event.data.type === 'SW_UPDATED') {
+                        console.log('[SW] Atualização detectada via mensagem — recarregando...');
+                        if (!refreshing) {
+                            refreshing = true;
+                            window.location.reload();
+                        }
+                    }
                 });
             });
         }
