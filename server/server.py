@@ -36,7 +36,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 # ── VAPID Keys (variáveis de ambiente no Render) ───────────────
 # Formato esperado: base64url raw (chave curta de ~43 chars, SEM headers PEM)
 # Para gerar: python -c "
-im#   from cryptography.hazmat.primitives.asymmetric import ec
+#   from cryptography.hazmat.primitives.asymmetric import ec
 #   import base64
 #   k = ec.generate_private_key(ec.SECP256R1())
 #   raw = k.private_numbers().private_value.to_bytes(32,'big')
