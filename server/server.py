@@ -313,7 +313,8 @@ async def api_status():
         "status": state.status,
         "transcript": state.current_transcript,
         "responses": {k: v["label"] for k, v in QUICK_RESPONSES.items()},
-        "debug_keys": [k for k in os.environ.keys() if "KEY" in k or "GEMINI" in k or "PORT" in k or "VAPID" in k]
+        "debug_keys": [k for k in os.environ.keys() if "KEY" in k or "GEMINI" in k or "PORT" in k or "VAPID" in k],
+        "gemini_api_key_len": len(os.environ.get("GEMINI_API_KEY", ""))
     }
 
 @app.get("/api/responses")
