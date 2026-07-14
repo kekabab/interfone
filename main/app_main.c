@@ -17,6 +17,7 @@
  */
 #include <stdio.h>
 #include <string.h>
+#include <stdint.h>
 #include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -222,37 +223,49 @@ static void recorder_task(void *arg) {
     char buf[2048];
     uint32_t sent_chunks = 0;
     uint32_t sent_bytes = 0;
-    ESP_LOGI(TAG, "[REC] Iniciando gravação contínua do visitante (16kHz)...");
+    ESP_LOGI(TAG, "[REC] Captura direta do ADC no I2S full-duplex (16kHz)...");
+
+    // O player Live ja instalou o unico driver I2S do A1S em TX+RX. Ler dele
+    // diretamente evita um segundo i2s_stream/driver ADF concorrendo pelo ADC.
     while (g_state == ST_LIVE) {
-        int read_len = raw_stream_read(raw_read, buf, sizeof(buf));
+        size_t read_len = 0;
+        esp_err_t err = i2s_read(I2S_PORT, buf, sizeof(buf), &read_len, portMAX_DELAY);
         if (g_state != ST_LIVE) {
             break;
         }
-        if (read_len > 0) {
-            if (esp_websocket_client_is_connected(ws_client)) {
-                int sent = esp_websocket_client_send_bin(ws_client, buf, read_len, portMAX_DELAY);
-                if (sent > 0) {
-                    sent_chunks++;
-                    sent_bytes += sent;
-                    if ((sent_chunks % 50) == 1) {
-                        ESP_LOGI(TAG, "[REC] Enviados %u bytes em %u blocos", sent_bytes, sent_chunks);
-                    }
-                } else {
-                    ESP_LOGW(TAG, "[REC] Falha ao enviar áudio: %d", sent);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "[REC] Erro I2S ao ler microfone: %s", esp_err_to_name(err));
+            vTaskDelay(10 / portTICK_PERIOD_MS);
+            continue;
+        }
+        if (read_len == 0) {
+            continue;
+        }
+
+        int peak = 0;
+        for (size_t i = 0; i + 1 < read_len; i += 2) {
+            int sample = ((int16_t *)buf)[i / 2];
+            if (sample < 0) sample = -sample;
+            if (sample > peak) peak = sample;
+        }
+
+        if (esp_websocket_client_is_connected(ws_client)) {
+            int sent = esp_websocket_client_send_bin(ws_client, buf, read_len, portMAX_DELAY);
+            if (sent > 0) {
+                sent_chunks++;
+                sent_bytes += sent;
+                if ((sent_chunks % 50) == 1) {
+                    ESP_LOGI(TAG, "[REC] Enviados %u bytes em %u blocos (pico=%d)", sent_bytes, sent_chunks, peak);
                 }
+            } else {
+                ESP_LOGW(TAG, "[REC] Falha ao enviar audio: %d", sent);
             }
-        } else if (read_len < 0) {
-            ESP_LOGW(TAG, "[REC] erro de leitura %d", read_len);
-            break;
         }
     }
-    ESP_LOGI(TAG, "[REC] Gravação contínua encerrada.");
-    recorder_pipeline_close();
+    ESP_LOGI(TAG, "[REC] Captura continua encerrada.");
     rec_task_handle = NULL;
     vTaskDelete(NULL);
 }
-
-// ── Handler de eventos do WebSocket ──
 static void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
     esp_websocket_event_data_t *data = (esp_websocket_event_data_t *)event_data;
 
@@ -287,8 +300,7 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
                 // Abre player contínuo da IA
                 player_live_pipeline_open(rate);
 
-                // Abre/ garante recorder e dispara a task de gravação contínua
-                recorder_pipeline_open();
+                // O player já abriu o I2S em TX+RX; inicia a captura direta do ADC.
                 g_state = ST_LIVE;
                 if (rec_task_handle == NULL) {
                     xTaskCreate(recorder_task, "rec_live", 8192, NULL, 5, &rec_task_handle);

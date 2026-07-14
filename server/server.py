@@ -455,7 +455,7 @@ async def send_push_notifications(title: str, body: str):
 
 
 # ── Timeout de sessão ────────────────────────────────────────
-async def call_timeout(seconds: int = 120):
+async def call_timeout(seconds: int = 60):
     """Encerra a sessão de atendimento automaticamente depois de N segundos."""
     await asyncio.sleep(seconds)
     if state.status in ("live", "playing_response", "ringing", "waiting_response"):
@@ -529,7 +529,7 @@ async def esp32_websocket(websocket: WebSocket):
                             "The doorbell just rang. Greet the visitor now in Brazilian Portuguese and ask who they want to speak with."
                         )
                         state.status = "live"
-                        state.call_timeout_task = asyncio.create_task(call_timeout(120))
+                        state.call_timeout_task = asyncio.create_task(call_timeout(60))
                         await sio.emit("intercom_status", {"status": "live", "message": "IA atendendo..."})
                         await sio.emit("intercom_ring", {"timestamp": state.ring_start_time, "ia": True})
                         asyncio.create_task(send_push_notifications(
