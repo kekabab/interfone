@@ -32,6 +32,9 @@ except ImportError:
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025")
 
+# Debug para ver as chaves enviadas pelo Render
+print(f"[DEBUG] Variáveis de ambiente detectadas: {[k for k in os.environ.keys() if 'KEY' in k or 'GEMINI' in k or 'PORT' in k]}")
+
 # Cliente Gemini reutilizável (a sessão live é aberta por campainha)
 genai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 if not genai_client:
