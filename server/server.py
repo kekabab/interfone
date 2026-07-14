@@ -243,8 +243,8 @@ class GeminiLiveSession:
             try:
                 # Chunks pequenos para baixa latência
                 chunk_size = 4096
-                for i in range(0, len(pcm24k), chunk_size):
-                    chunk = pcm24k[i:i + chunk_size]
+                for i in range(0, len(pcm16k), chunk_size):
+                    chunk = pcm16k[i:i + chunk_size]
                     await self.esp32_ws.send_bytes(chunk)
             except Exception as e:
                 print(f"[ESP32] Erro ao enviar áudio da IA: {e}")
