@@ -220,6 +220,8 @@ static void player_raw_pipeline_close(void) {
 // Pára quando g_state sai de ST_LIVE (ou ST_GREETING pós-saudação).
 static void recorder_task(void *arg) {
     char buf[2048];
+    uint32_t sent_chunks = 0;
+    uint32_t sent_bytes = 0;
     ESP_LOGI(TAG, "[REC] Iniciando gravação contínua do visitante (16kHz)...");
     while (g_state == ST_LIVE) {
         int read_len = raw_stream_read(raw_read, buf, sizeof(buf));
@@ -228,7 +230,16 @@ static void recorder_task(void *arg) {
         }
         if (read_len > 0) {
             if (esp_websocket_client_is_connected(ws_client)) {
-                esp_websocket_client_send_bin(ws_client, buf, read_len, portMAX_DELAY);
+                int sent = esp_websocket_client_send_bin(ws_client, buf, read_len, portMAX_DELAY);
+                if (sent > 0) {
+                    sent_chunks++;
+                    sent_bytes += sent;
+                    if ((sent_chunks % 50) == 1) {
+                        ESP_LOGI(TAG, "[REC] Enviados %u bytes em %u blocos", sent_bytes, sent_chunks);
+                    }
+                } else {
+                    ESP_LOGW(TAG, "[REC] Falha ao enviar áudio: %d", sent);
+                }
             }
         } else if (read_len < 0) {
             ESP_LOGW(TAG, "[REC] erro de leitura %d", read_len);
@@ -322,7 +333,18 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
         } else if (data->op_code == 2 && data->data_len > 0) {  // binário
             // Áudio da IA -> player live (em ST_LIVE)
             if (g_state == ST_LIVE && raw_write_live) {
-                raw_stream_write(raw_write_live, (char *)data->data_ptr, data->data_len);
+                static uint32_t live_rx_chunks = 0;
+                static uint32_t live_rx_bytes = 0;
+                int written = raw_stream_write(raw_write_live, (char *)data->data_ptr, data->data_len);
+                if (written > 0) {
+                    live_rx_chunks++;
+                    live_rx_bytes += written;
+                    if ((live_rx_chunks % 50) == 1) {
+                        ESP_LOGI(TAG, "[LIVE] Recebidos %u bytes da IA em %u blocos", live_rx_bytes, live_rx_chunks);
+                    }
+                } else {
+                    ESP_LOGW(TAG, "[LIVE] Falha ao colocar áudio da IA no player: %d", written);
+                }
             }
             // Áudio .raw de resposta -> player de .raw (em ST_PLAYING_RAW)
             else if (g_state == ST_PLAYING_RAW && raw_write_raw) {
