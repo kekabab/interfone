@@ -122,9 +122,7 @@ class GeminiLiveSession:
         self._recv_task: asyncio.Task | None = None
         self._send_task: asyncio.Task | None = None
         self._closed = False
-        self._mic_muted = False  # ducking: True = não repassar mic ao Gemini
         self._outgoing_audio = asyncio.Lock()
-        self._mic_muted_until = 0.0
         self.audio_queue = asyncio.Queue()
 
     async def start(self):
@@ -134,6 +132,11 @@ class GeminiLiveSession:
             system_instruction=SYSTEM_INSTRUCTION,
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
+            # Conversa natural: se o visitante começar a falar, interrompe a IA.
+            realtime_input_config=types.RealtimeInputConfig(
+                activity_handling=types.ActivityHandling.START_OF_ACTIVITY_INTERRUPTS,
+                turn_coverage=types.TurnCoverage.TURN_INCLUDES_ONLY_ACTIVITY,
+            ),
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Aoede")
@@ -154,12 +157,8 @@ class GeminiLiveSession:
         """Fila de áudio para ser enviado ao Gemini Live."""
         if self._closed or not self.session:
             return
-        if self._mic_muted:
-            # Fallback: se a API não enviar turn_complete, libera o mic
-            # pouco depois do último pacote de fala da IA.
-            if time.monotonic() < self._mic_muted_until:
-                return
-            self._mic_muted = False
+        # Mantém o microfone sempre ativo. O Gemini Live detecta a fala e
+        # interrompe a própria resposta quando o visitante começa a falar.
         self.audio_queue.put_nowait(pcm16k)
 
     async def _send_loop(self):
@@ -209,8 +208,6 @@ class GeminiLiveSession:
                     for part in model_turn.parts:
                         blob = getattr(part, "inline", None) or getattr(part, "inline_data", None)
                         if blob and getattr(blob, "data", None):
-                            self._mic_muted = True
-                            self._mic_muted_until = time.monotonic() + 0.8
                             # Resample de 24kHz (Gemini) para 16kHz (ESP32) para manter I2S TX/RX síncronos
                             pcm16k = resample_24k_to_16k(blob.data)
                             if pcm16k:
@@ -225,10 +222,6 @@ class GeminiLiveSession:
                 if it and getattr(it, "text", None):
                     await self.sio.emit("intercom_transcript", {"text": it.text, "resident": "todos"})
 
-                # 4) Turno completo
-                if getattr(sc, "turn_complete", False):
-                    self._mic_muted = False
-                    self._mic_muted_until = 0.0
         except asyncio.CancelledError:
             pass
         except Exception as e:
