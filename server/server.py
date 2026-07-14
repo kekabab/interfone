@@ -101,9 +101,11 @@ class GeminiLiveSession:
         self.session = None  # AsyncSession do Gemini
         self._cm = None  # mantém referência ao context manager pra evitar GC prematuro
         self._recv_task: asyncio.Task | None = None
+        self._send_task: asyncio.Task | None = None
         self._closed = False
         self._mic_muted = False  # ducking: True = não repassar mic ao Gemini
         self._outgoing_audio = asyncio.Lock()
+        self.audio_queue = asyncio.Queue()
 
     async def start(self):
         """Abre a sessão Gemini Live e dispara o loop de recebimento."""
@@ -125,20 +127,34 @@ class GeminiLiveSession:
         self.session = await self._cm.__aenter__()
         print("[GEMINI] Sessão live aberta.")
         self._recv_task = asyncio.create_task(self._receive_loop())
+        self._send_task = asyncio.create_task(self._send_loop())
         return self
 
     async def feed_visitor_audio(self, pcm16k: bytes):
-        """Repassa áudio do visitante (PCM 16kHz) ao Gemini, exceto em ducking."""
+        """Fila de áudio para ser enviado ao Gemini Live."""
         if self._closed or not self.session:
             return
         if self._mic_muted:
             return  # IA está falando: ignora o mic para evitar eco
+        self.audio_queue.put_nowait(pcm16k)
+
+    async def _send_loop(self):
+        """Loop que consome a fila e envia sequencialmente ao Gemini."""
         try:
-            await self.session.send_realtime_input(
-                audio=types.Blob(data=pcm16k, mime_type="audio/pcm;rate=16000")
-            )
+            while not self._closed:
+                pcm16k = await self.audio_queue.get()
+                try:
+                    await self.session.send_realtime_input(
+                        audio=types.Blob(data=pcm16k, mime_type="audio/pcm;rate=16000")
+                    )
+                except Exception as e:
+                    print(f"[GEMINI] Erro ao enviar áudio do visitante no loop de envio: {e}")
+                finally:
+                    self.audio_queue.task_done()
+        except asyncio.CancelledError:
+            pass
         except Exception as e:
-            print(f"[GEMINI] Erro ao enviar áudio do visitante: {e}")
+            print(f"[GEMINI] Erro crítico no loop de envio de áudio: {e}")
 
     async def inject_quick_response(self, text_for_ia: str):
         """Morador apertou um botão: pede à IA que encerre em uma frase curta.
@@ -220,6 +236,12 @@ class GeminiLiveSession:
             self._recv_task.cancel()
             try:
                 await self._recv_task
+            except asyncio.CancelledError:
+                pass
+        if self._send_task and not self._send_task.done():
+            self._send_task.cancel()
+            try:
+                await self._send_task
             except asyncio.CancelledError:
                 pass
         if self.session:
@@ -469,6 +491,7 @@ async def esp32_websocket(websocket: WebSocket):
                         print(f"[ESP32] TRIGGER_CALL ignored: {state.status} session already active.")
                         continue
 
+                    websocket._audio_buffer = bytearray()
                     state.ring_start_time = time.time()
                     print("[CALL] Starting Gemini Live session.")
                     state.status = "connecting"
@@ -519,7 +542,14 @@ async def esp32_websocket(websocket: WebSocket):
             elif "bytes" in data:
                 # Chunk de áudio do visitante (PCM 16kHz) -> repassa ao Gemini Live
                 if state.live_session and not state.live_session._closed:
-                    await state.live_session.feed_visitor_audio(data["bytes"])
+                    if not hasattr(websocket, "_audio_buffer"):
+                        websocket._audio_buffer = bytearray()
+                    websocket._audio_buffer.extend(data["bytes"])
+                    # Buffer de 4800 bytes (~150ms) para reduzir a taxa de pacotes no loop de envio
+                    if len(websocket._audio_buffer) >= 4800:
+                        chunk = bytes(websocket._audio_buffer)
+                        websocket._audio_buffer.clear()
+                        await state.live_session.feed_visitor_audio(chunk)
 
     except WebSocketDisconnect:
         print("[-] ESP32 desconectado normalmente.")
