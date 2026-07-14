@@ -30,7 +30,7 @@ except ImportError:
 
 # ── Configuração ──────────────────────────────────────────────
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-live-preview")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-native-audio-preview-12-2025")
 
 # Cliente Gemini reutilizável (a sessão live é aberta por campainha)
 genai_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
