@@ -124,6 +124,7 @@ class GeminiLiveSession:
         self._closed = False
         self._mic_muted = False  # ducking: True = não repassar mic ao Gemini
         self._outgoing_audio = asyncio.Lock()
+        self._mic_muted_until = 0.0
         self.audio_queue = asyncio.Queue()
 
     async def start(self):
@@ -154,7 +155,11 @@ class GeminiLiveSession:
         if self._closed or not self.session:
             return
         if self._mic_muted:
-            return  # IA está falando: ignora o mic para evitar eco
+            # Fallback: se a API não enviar turn_complete, libera o mic
+            # pouco depois do último pacote de fala da IA.
+            if time.monotonic() < self._mic_muted_until:
+                return
+            self._mic_muted = False
         self.audio_queue.put_nowait(pcm16k)
 
     async def _send_loop(self):
@@ -205,16 +210,11 @@ class GeminiLiveSession:
                         blob = getattr(part, "inline", None) or getattr(part, "inline_data", None)
                         if blob and getattr(blob, "data", None):
                             self._mic_muted = True
+                            self._mic_muted_until = time.monotonic() + 0.8
                             # Resample de 24kHz (Gemini) para 16kHz (ESP32) para manter I2S TX/RX síncronos
                             pcm16k = resample_24k_to_16k(blob.data)
                             if pcm16k:
                                 await self._send_audio_to_esp32(pcm16k)
-                # Ducking: enquanto a IA fala, emudece o mic; ao parar, libera
-                if self._mic_muted:
-                    self._mic_muted = True
-                else:
-                    self._mic_muted = False
-
                 # 2) Transcrição da SAÍDA da IA (o que ela disse)
                 ot = getattr(sc, "output_transcription", None)
                 if ot and getattr(ot, "text", None):
@@ -228,6 +228,7 @@ class GeminiLiveSession:
                 # 4) Turno completo
                 if getattr(sc, "turn_complete", False):
                     self._mic_muted = False
+                    self._mic_muted_until = 0.0
         except asyncio.CancelledError:
             pass
         except Exception as e:
