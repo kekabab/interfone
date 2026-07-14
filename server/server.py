@@ -43,6 +43,25 @@ if not genai_client:
 AUDIO_DIR = Path(__file__).parent
 STATIC_DIR = Path(__file__).parent / "static"
 
+def resample_24k_to_16k(data_24k: bytes) -> bytes:
+    """Resampla PCM 16-bit mono de 24kHz para 16kHz usando interpolação linear simples."""
+    # Garante que seja múltiplo de 6 bytes (3 samples * 2 bytes)
+    length = (len(data_24k) // 6) * 6
+    if length == 0:
+        return b""
+    num_samples = length // 2
+    samples = struct.unpack(f"<{num_samples}h", data_24k[:length])
+    resampled = []
+    # Relação 3:2 (a cada 3 samples a 24k, geramos 2 a 16k)
+    for i in range(0, num_samples - 2, 3):
+        s0 = samples[i]
+        s1 = samples[i+1]
+        s2 = samples[i+2]
+        resampled.append(s0)
+        resampled.append((s1 + s2) // 2)
+    return struct.pack(f"<{len(resampled)}h", *resampled)
+
+
 # ── VAPID Keys (variáveis de ambiente no Render) ───────────────
 VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
 VAPID_PUBLIC_KEY  = os.environ.get("VAPID_PUBLIC_KEY", "")
@@ -186,7 +205,10 @@ class GeminiLiveSession:
                         blob = getattr(part, "inline", None) or getattr(part, "inline_data", None)
                         if blob and getattr(blob, "data", None):
                             self._mic_muted = True
-                            await self._send_audio_to_esp32(blob.data)
+                            # Resample de 24kHz (Gemini) para 16kHz (ESP32) para manter I2S TX/RX síncronos
+                            pcm16k = resample_24k_to_16k(blob.data)
+                            if pcm16k:
+                                await self._send_audio_to_esp32(pcm16k)
                 # Ducking: enquanto a IA fala, emudece o mic; ao parar, libera
                 if self._mic_muted:
                     self._mic_muted = True
@@ -213,8 +235,8 @@ class GeminiLiveSession:
         finally:
             print("[GEMINI] Loop de recebimento encerrado.")
 
-    async def _send_audio_to_esp32(self, pcm24k: bytes):
-        """Envia um chunk de áudio da IA (PCM 24kHz) ao ESP32 para tocar."""
+    async def _send_audio_to_esp32(self, pcm16k: bytes):
+        """Envia um chunk de áudio da IA (PCM 16kHz) ao ESP32 para tocar."""
         if self._closed or not self.esp32_ws:
             return
         async with self._outgoing_audio:
@@ -507,7 +529,7 @@ async def esp32_websocket(websocket: WebSocket):
 
                     try:
                         state.live_session = await GeminiLiveSession(websocket, sio).start()
-                        await websocket.send_text("PLAY_LIVE_START:24000")
+                        await websocket.send_text("PLAY_LIVE_START:16000")
                         await asyncio.sleep(0.2)
                         await state.live_session.inject_quick_response(
                             "The doorbell just rang. Greet the visitor now in Brazilian Portuguese and ask who they want to speak with."
