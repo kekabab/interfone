@@ -1,0 +1,14 @@
+build/
+managed_components/
+*.log
+.vscode/
+.idea/
+__pycache__/
+*.pyc
+.env
+local_components_list.temp.yml
+dependencies.lock
+*.wav
+*.raw
+!server/*.raw
+!main/*.raw

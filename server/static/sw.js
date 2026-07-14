@@ -1,4 +1,4 @@
-const CACHE_NAME = 'interfone-ai-v5';
+const CACHE_NAME = 'interfone-ai-v6';
 const ASSETS = [
     '/manifest.json'
     // NÃO cacheamos '/' (index.html) propositalmente.

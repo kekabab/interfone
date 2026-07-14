@@ -416,7 +416,7 @@
     </div>
 
     <div class="header">
-        <h1>PORTÃO EXECUTIVO <span style="font-size:0.55rem; opacity:0.45; vertical-align:middle;">V4</span></h1>
+        <h1>PORTÃO EXECUTIVO <span style="font-size:0.55rem; opacity:0.45; vertical-align:middle;">V5</span></h1>
         <div class="badges-row">
             <div class="status-badge">
                 <div id="online-dot" class="dot"></div>
@@ -706,12 +706,39 @@
                 document.getElementById('status-text').innerText = 'Reconectando...';
             });
 
+            // ── Diálogo ao vivo (IA ↔ visitante) ──
+            // Acumulamos as falas em ordem para mostrar a conversa rolando.
+            let liveDialogue = [];
+            let lastSpeaker = null;
+            let lastText = '';
+
+            function renderDialogue() {
+                const el = document.getElementById('transcription-text');
+                if (liveDialogue.length === 0) {
+                    el.innerHTML = '<span class="empty-state">Conversa começando...</span>';
+                    return;
+                }
+                el.innerHTML = liveDialogue.map(d => {
+                    const isIa = d.who === 'ia';
+                    const color = isIa ? 'var(--primary)' : 'white';
+                    const icon = isIa ? '🤖 IA' : '🗣️ Visitante';
+                    return '<div style="margin-bottom:10px;"><span style="font-size:0.7rem; color:var(--text-muted); display:block;">' + icon + '</span>' +
+                           '<span style="font-size:1.05rem; color:' + color + '; font-weight:500;">"' + d.text + '"</span></div>';
+                }).join('');
+                // Rola pra o final
+                el.scrollTop = el.scrollHeight;
+            }
+
             socket.on('intercom_ring', (data) => {
                 document.getElementById('ringing-card').classList.add('active');
                 if (audioCtx) audioCtx.resume();
                 startRingTone();
                 sendLocalNotification('🔔 Interfone!', 'Alguém no portão.');
                 if (navigator.vibrate) navigator.vibrate([500, 200, 500, 200, 500]);
+                // Limpa o diálogo pra nova sessão
+                liveDialogue = [];
+                lastSpeaker = null;
+                lastText = '';
                 document.getElementById('transcription-text').innerHTML = '<span class="empty-state">Visitante no portão...</span>';
             });
 
@@ -719,13 +746,28 @@
                 if (data.message) document.getElementById('status-text').innerText = data.message;
                 const transcriptEl = document.getElementById('transcription-text');
 
-                if (data.status === 'recording') {
+                if (data.status === 'live') {
+                    // IA está atendendo em tempo real
+                    stopRingTone();
+                    document.getElementById('ringing-card').classList.remove('active');
+                    if (liveDialogue.length === 0) {
+                        transcriptEl.innerHTML = '<span style="color:var(--primary)">🤖 IA atendendo o visitante...</span>';
+                    } else {
+                        renderDialogue();
+                    }
+                } else if (data.status === 'recording') {
                     transcriptEl.innerHTML = '<span style="color:var(--accent)">🎙️ Ouvindo visitante...</span>';
                 } else if (data.status === 'transcribing') {
                     transcriptEl.innerHTML = '<span style="color:var(--primary)">🧠 Entendendo o que foi dito...</span>';
+                } else if (data.status === 'playing_response') {
+                    // Morador apertou um botão; mostra o que está tocando
+                    // (o diálogo atual permanece visível)
                 } else if (data.status === 'idle' || data.status === 'offline') {
                     stopRingTone();
                     document.getElementById('ringing-card').classList.remove('active');
+                    if (liveDialogue.length === 0) {
+                        transcriptEl.innerHTML = '<span class="empty-state">Monitorando áudio...</span>';
+                    }
                     if (data.status === 'offline') {
                         document.getElementById('online-dot').classList.remove('online');
                         document.getElementById('status-text').innerText = 'Interfone offline';
@@ -733,15 +775,35 @@
                 }
             });
 
+            // Transcrição da fala do VISITANTE (streaming, pode chegar em partes)
             socket.on('intercom_transcript', (data) => {
-                stopRingTone();
-                document.getElementById('ringing-card').classList.remove('active');
-                const transcriptEl = document.getElementById('transcription-text');
                 if (data.text) {
-                    transcriptEl.innerHTML = '<div style="font-size:1.35rem; color:white; font-weight:600;">🗣️ "' + data.text + '"</div>';
-                    sendLocalNotification('🗣️ Visitante:', data.text);
-                } else {
-                    transcriptEl.innerHTML = '<span class="empty-state">O visitante não falou nada.</span>';
+                    // Se mudou de falante ou é a primeira fala, cria nova linha
+                    if (lastSpeaker !== 'visitante') {
+                        liveDialogue.push({ who: 'visitante', text: data.text });
+                        lastSpeaker = 'visitante';
+                        lastText = data.text;
+                    } else {
+                        // Mesmo falante: se o texto é continuação, anexa; se é novo, nova linha
+                        liveDialogue[liveDialogue.length - 1].text += ' ' + data.text;
+                        lastText += ' ' + data.text;
+                    }
+                    renderDialogue();
+                }
+            });
+
+            // Transcrição da fala da IA (streaming)
+            socket.on('ia_transcript', (data) => {
+                if (data.text) {
+                    if (lastSpeaker !== 'ia') {
+                        liveDialogue.push({ who: 'ia', text: data.text });
+                        lastSpeaker = 'ia';
+                        lastText = data.text;
+                    } else {
+                        liveDialogue[liveDialogue.length - 1].text += ' ' + data.text;
+                        lastText += ' ' + data.text;
+                    }
+                    renderDialogue();
                 }
             });
 

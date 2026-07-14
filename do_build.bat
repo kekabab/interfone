@@ -1,4 +1,19 @@
-call D:\esp\.espressif\frameworks\esp-idf-v4.2.5\export.bat > export.log 2>&1
-cd C:\Users\kekab\.gemini\antigravity\scratch\esp32-ai-intercom
-set ADF_PATH=C:\esp\esp-adf-v2
-idf.py build > build.log 2>&1
+@echo off
+setlocal
+set "PROJECT_ROOT=%~dp0"
+set "IDF_PATH=D:\esp\.espressif\frameworks\esp-idf-v4.2.5"
+set "ADF_PATH=C:\esp\esp-adf-v2"
+
+if not exist "%IDF_PATH%\export.bat" (
+    echo [ERRO] ESP-IDF nao encontrado em %IDF_PATH%
+    exit /b 1
+)
+if not exist "%ADF_PATH%\components" (
+    echo [ERRO] ESP-ADF nao encontrado em %ADF_PATH%
+    exit /b 1
+)
+
+call "%IDF_PATH%\export.bat"
+cd /d "%PROJECT_ROOT%"
+set "BUILD_DIR=C:\Users\kekab\.gemini\antigravity\scratch\interfone-build"
+idf.py -B "%BUILD_DIR%" build

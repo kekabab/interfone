@@ -5,5 +5,11 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn server:sio_app --host 0.0.0.0 --port $PORT
     envVars:
-      - key: OPENAI_API_KEY
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_EMAIL
         sync: false

@@ -31,18 +31,8 @@ esp_err_t wifi_init_sta(const char* ssid, const char* pass) {
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_t *netif = esp_netif_create_default_wifi_sta();
     
-    // Forçar IP Fixo para garantir que ele ache o PC via WebSocket (burlar router de duas bandas)
-    esp_netif_dhcpc_stop(netif);
-    esp_netif_ip_info_t ip_info;
-    IP4_ADDR(&ip_info.ip, 192, 168, 0, 16);
-    IP4_ADDR(&ip_info.gw, 192, 168, 0, 1);
-    IP4_ADDR(&ip_info.netmask, 255, 255, 255, 0);
-    esp_netif_set_ip_info(netif, &ip_info);
+    // Use DHCP because the remote backend needs normal network DNS.
 
-    esp_netif_dns_info_t dns_info = {0};
-    dns_info.ip.type = ESP_IPADDR_TYPE_V4;
-    dns_info.ip.u_addr.ip4.addr = esp_ip4addr_aton("8.8.8.8");
-    esp_netif_set_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns_info);
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));

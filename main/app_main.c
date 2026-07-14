@@ -1,3 +1,20 @@
+/*
+ * Interfone AI — Firmware ESP32-A1S (Gemini Live, full-duplex)
+ *
+ * Fluxo (nova arquitetura com IA em tempo real):
+ *   1. Campainha -> envia TRIGGER_CALL ao servidor e toca "Olá" localmente.
+ *   2. Servidor abre a sessão Gemini Live e responde PLAY_LIVE_START:24000.
+ *   3. ESP32 abre player contínuo (24kHz) + recorder contínuo (16kHz) AO MESMO TEMPO
+ *      (full-duplex). O mic envia chunks PCM 16kHz continuamente; o alto-falante
+ *      recebe chunks PCM 24kHz da IA continuamente.
+ *   4. Quando o morador aperta um botão, o servidor envia PLAY_LIVE_END (para o
+ *      player live), PLAY_RESPONSE:<rate>:<file> + áudio .raw, e PLAY_DONE.
+ *      Durante esse playback o mic é pausado (evita eco do .raw).
+ *   5. Ao final, o servidor encerra a sessão.
+ *
+ * Regra de ouro (STATE_OF_PROJECT.md): NUNCA chamar i2s_driver_install manualmente
+ * nem usar uninstall_drv=false nos streams — o ESP-ADF gerencia o I2S. Cumprida.
+ */
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -17,218 +34,330 @@
 #include "audio_common.h"
 #include "i2s_stream.h"
 #include "raw_stream.h"
-#include "filter_resample.h"
 #include "es8388.h"
 
-// Wi-fi module header
 #include "wifi_setup.h"
 
+// Áudios embutidos (gerados a 24kHz, PCM 16-bit mono)
 extern const uint8_t ola_start[] asm("_binary_ola_esp32_raw_start");
 extern const uint8_t ola_end[]   asm("_binary_ola_esp32_raw_end");
-
 extern const uint8_t minuto_start[] asm("_binary_minuto_esp32_raw_start");
 extern const uint8_t minuto_end[]   asm("_binary_minuto_esp32_raw_end");
 
-#define BOTAO_PLAY GPIO_NUM_23
-static const char *TAG = "INTERFONE_AI";
+#define TAG "INTERFONE_AI"
+
+// GPIOs do botão de campainha (mantidas do firmware original)
+#define BOTAO_1 GPIO_NUM_36
+#define BOTAO_2 GPIO_NUM_13
+#define BOTAO_3 GPIO_NUM_23
+#define BOTAO_4 GPIO_NUM_5
+#define BOTAO_5 GPIO_NUM_18
+
+// Sample rates
+#define REC_SAMPLE_RATE 16000      // Gemini Live exige 16kHz na entrada
+#define LIVE_PLAY_RATE  24000      // Gemini Live fala em 24kHz
+#define GREETING_RATE   24000      // ola_esp32.raw e minuto_esp32.raw são 24kHz
+#define I2S_PORT        I2S_NUM_0
+
 esp_websocket_client_handle_t ws_client;
 
-#define RECORD_TIME_SEC 4
-#define SAMPLE_RATE 8000        
-#define CODEC_SAMPLE_RATE 8000  
-#define CODEC_CHANNELS 1
-#define TTS_SAMPLE_RATE 24000
-#define I2S_PORT I2S_NUM_0
+// ── Estado da aplicação ──
+typedef enum {
+    ST_IDLE,
+    ST_GREETING,        // tocando "Olá" antes da IA assumir
+    ST_LIVE,            // full-duplex: mic + player contínuos com a IA
+    ST_PLAYING_RAW,     // tocando um .raw de resposta rápida (mic pausado)
+    ST_HANGUP,          // chamada encerrada, voltando ao idle
+} app_state_t;
 
-uint8_t *audio_buffer;
-size_t audio_buffer_size = RECORD_TIME_SEC * SAMPLE_RATE * 2;
+static volatile app_state_t g_state = ST_IDLE;
 
-bool is_recording = false;
-volatile bool stop_recording = false;
-bool is_playing_response = false;
-static audio_element_handle_t raw_read, raw_write;
-static audio_pipeline_handle_t recorder, player;
+// Pipelines ESP-ADF
+static audio_element_handle_t raw_read = NULL;    // saída do recorder
+static audio_element_handle_t raw_write_live = NULL;  // entrada do player live (24kHz)
+static audio_element_handle_t raw_write_raw = NULL;   // entrada do player de .raw
+static audio_pipeline_handle_t recorder = NULL;
+static audio_pipeline_handle_t player_live = NULL;    // player contínuo (IA)
+static audio_pipeline_handle_t player_raw = NULL;     // player de .raw (respostas rápidas)
 
-static esp_err_t recorder_pipeline_open()
-{
-    audio_element_handle_t i2s_stream_reader;
+// Task handles
+static TaskHandle_t rec_task_handle = NULL;
+
+// ── Constrói o pipeline de RECORDER (mic -> raw) a 16kHz ──
+static esp_err_t recorder_pipeline_open(void) {
+    if (recorder) return ESP_OK;  // já aberto (full-duplex mantém aberto)
+
     audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
     recorder = audio_pipeline_init(&pipeline_cfg);
 
     i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
     i2s_cfg.type = AUDIO_STREAM_READER;
-    i2s_cfg.i2s_config.sample_rate = SAMPLE_RATE;
+    i2s_cfg.i2s_config.sample_rate = REC_SAMPLE_RATE;
     i2s_cfg.i2s_config.channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT;
-    i2s_stream_reader = i2s_stream_init(&i2s_cfg);
-    
+    audio_element_handle_t i2s_reader = i2s_stream_init(&i2s_cfg);
+
     audio_element_info_t i2s_info = {0};
-    audio_element_getinfo(i2s_stream_reader, &i2s_info);
+    audio_element_getinfo(i2s_reader, &i2s_info);
     i2s_info.bits = 16;
     i2s_info.channels = 1;
-    i2s_info.sample_rates = SAMPLE_RATE; 
-    audio_element_setinfo(i2s_stream_reader, &i2s_info);
+    i2s_info.sample_rates = REC_SAMPLE_RATE;
+    audio_element_setinfo(i2s_reader, &i2s_info);
 
     raw_stream_cfg_t raw_cfg = RAW_STREAM_CFG_DEFAULT();
     raw_cfg.type = AUDIO_STREAM_READER;
     raw_read = raw_stream_init(&raw_cfg);
     audio_element_set_output_timeout(raw_read, portMAX_DELAY);
 
-    audio_pipeline_register(recorder, i2s_stream_reader, "i2s");
+    audio_pipeline_register(recorder, i2s_reader, "i2s");
     audio_pipeline_register(recorder, raw_read, "raw");
-
-    const char *link_tag[2] = {"i2s", "raw"};
-    audio_pipeline_link(recorder, &link_tag[0], 2);
-
+    const char *link[2] = {"i2s", "raw"};
+    audio_pipeline_link(recorder, link, 2);
     audio_pipeline_run(recorder);
-    ESP_LOGI(TAG, "Recorder pipeline created (PCM 8k Mono)");
+
+    ESP_LOGI(TAG, "Recorder pipeline aberto (PCM 16k Mono)");
     return ESP_OK;
 }
 
-void player_pipeline_open(int rate) {
-    if (player) {
-        audio_pipeline_stop(player);
-        audio_pipeline_wait_for_stop(player);
-        audio_pipeline_deinit(player);
-        player = NULL;
-        raw_write = NULL;
-    }
-
-    audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
-    player = audio_pipeline_init(&pipeline_cfg);
-
-    raw_stream_cfg_t raw_cfg = RAW_STREAM_CFG_DEFAULT();
-    raw_cfg.type = AUDIO_STREAM_WRITER;
-    raw_write = raw_stream_init(&raw_cfg);
-
-    i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
-    i2s_cfg.type = AUDIO_STREAM_WRITER;
-    i2s_cfg.i2s_config.sample_rate = rate;
-    i2s_cfg.i2s_config.channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT;
-    audio_element_handle_t i2s_stream_writer = i2s_stream_init(&i2s_cfg);
-    
-    audio_pipeline_register(player, raw_write, "raw");
-    audio_pipeline_register(player, i2s_stream_writer, "i2s");
-    
-    const char *link_tag[2] = {"raw", "i2s"};
-    audio_pipeline_link(player, &link_tag[0], 2);
-    
-    audio_pipeline_run(player);
-    ESP_LOGI(TAG, "Player pipeline created (PCM %dHz Mono)", rate);
-}
-
-// ── TAREFA DE GRAVAÇÃO (ADF PIPELINE) ──
-static void recorder_pipeline_task(void *pvParameters) {
-    if (recorder_pipeline_open() != ESP_OK) {
-        vTaskDelete(NULL);
-        return;
-    }
-    
-    ESP_LOGI(TAG, "Lendo voz do visitante...");
-    int64_t start_time = esp_timer_get_time();
-    char buf[2048];
-
-    // Grava por até 5 segundos ou até o morador interromper
-    while (!stop_recording && (esp_timer_get_time() - start_time) < 5000000) {
-        int read_len = raw_stream_read(raw_read, buf, sizeof(buf));
-        if (read_len > 0 && esp_websocket_client_is_connected(ws_client)) {
-            esp_websocket_client_send_bin(ws_client, buf, read_len, portMAX_DELAY);
-        } else if (read_len < 0) {
-            break;
-        }
-    }
-
-    ESP_LOGI(TAG, "Finalizando gravação do visitante.");
-    if (esp_websocket_client_is_connected(ws_client)) {
-        esp_websocket_client_send_text(ws_client, "AUDIO_END", 9, portMAX_DELAY);
-    }
-    
+static void recorder_pipeline_close(void) {
     if (recorder) {
         audio_pipeline_stop(recorder);
         audio_pipeline_wait_for_stop(recorder);
         audio_pipeline_deinit(recorder);
         recorder = NULL;
+        raw_read = NULL;
     }
-    raw_read = NULL;
-    
+}
+
+// ── Constrói o PLAYER contínuo (raw -> i2s) a 24kHz para a IA ──
+static esp_err_t player_live_pipeline_open(int rate) {
+    if (player_live) {
+        // reabre com novo rate se mudou
+        audio_pipeline_stop(player_live);
+        audio_pipeline_wait_for_stop(player_live);
+        audio_pipeline_deinit(player_live);
+        player_live = NULL;
+        raw_write_live = NULL;
+    }
+    audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
+    player_live = audio_pipeline_init(&pipeline_cfg);
+
+    raw_stream_cfg_t raw_cfg = RAW_STREAM_CFG_DEFAULT();
+    raw_cfg.type = AUDIO_STREAM_WRITER;
+    raw_write_live = raw_stream_init(&raw_cfg);
+
+    i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
+    i2s_cfg.type = AUDIO_STREAM_WRITER;
+    i2s_cfg.i2s_config.sample_rate = rate;
+    i2s_cfg.i2s_config.channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT;
+    audio_element_handle_t i2s_writer = i2s_stream_init(&i2s_cfg);
+
+    audio_pipeline_register(player_live, raw_write_live, "raw");
+    audio_pipeline_register(player_live, i2s_writer, "i2s");
+    const char *link[2] = {"raw", "i2s"};
+    audio_pipeline_link(player_live, link, 2);
+    audio_pipeline_run(player_live);
+
+    ESP_LOGI(TAG, "Player LIVE aberto (PCM %dHz Mono)", rate);
+    return ESP_OK;
+}
+
+static void player_live_pipeline_close(void) {
+    if (player_live) {
+        audio_pipeline_stop(player_live);
+        audio_pipeline_wait_for_stop(player_live);
+        audio_pipeline_deinit(player_live);
+        player_live = NULL;
+        raw_write_live = NULL;
+    }
+}
+
+// ── Constrói o PLAYER de .raw (respostas rápidas) com rate variável ──
+static esp_err_t player_raw_pipeline_open(int rate) {
+    if (player_raw) {
+        audio_pipeline_stop(player_raw);
+        audio_pipeline_wait_for_stop(player_raw);
+        audio_pipeline_deinit(player_raw);
+        player_raw = NULL;
+        raw_write_raw = NULL;
+    }
+    audio_pipeline_cfg_t pipeline_cfg = DEFAULT_AUDIO_PIPELINE_CONFIG();
+    player_raw = audio_pipeline_init(&pipeline_cfg);
+
+    raw_stream_cfg_t raw_cfg = RAW_STREAM_CFG_DEFAULT();
+    raw_cfg.type = AUDIO_STREAM_WRITER;
+    raw_write_raw = raw_stream_init(&raw_cfg);
+
+    i2s_stream_cfg_t i2s_cfg = I2S_STREAM_CFG_DEFAULT();
+    i2s_cfg.type = AUDIO_STREAM_WRITER;
+    i2s_cfg.i2s_config.sample_rate = rate;
+    i2s_cfg.i2s_config.channel_format = I2S_CHANNEL_FMT_ONLY_RIGHT;
+    audio_element_handle_t i2s_writer = i2s_stream_init(&i2s_cfg);
+
+    audio_pipeline_register(player_raw, raw_write_raw, "raw");
+    audio_pipeline_register(player_raw, i2s_writer, "i2s");
+    const char *link[2] = {"raw", "i2s"};
+    audio_pipeline_link(player_raw, link, 2);
+    audio_pipeline_run(player_raw);
+
+    ESP_LOGI(TAG, "Player RAW aberto (PCM %dHz Mono)", rate);
+    return ESP_OK;
+}
+
+static void player_raw_pipeline_close(void) {
+    if (player_raw) {
+        audio_pipeline_stop(player_raw);
+        audio_pipeline_wait_for_stop(player_raw);
+        audio_pipeline_deinit(player_raw);
+        player_raw = NULL;
+        raw_write_raw = NULL;
+    }
+}
+
+// ── Tarefa de gravação contínua: lê o mic e envia ao servidor ──
+// Pára quando g_state sai de ST_LIVE (ou ST_GREETING pós-saudação).
+static void recorder_task(void *arg) {
+    char buf[2048];
+    ESP_LOGI(TAG, "[REC] Iniciando gravação contínua do visitante (16kHz)...");
+    while (g_state == ST_LIVE) {
+        int read_len = raw_stream_read(raw_read, buf, sizeof(buf));
+        if (g_state != ST_LIVE) {
+            break;
+        }
+        if (read_len > 0) {
+            if (esp_websocket_client_is_connected(ws_client)) {
+                esp_websocket_client_send_bin(ws_client, buf, read_len, portMAX_DELAY);
+            }
+        } else if (read_len < 0) {
+            ESP_LOGW(TAG, "[REC] erro de leitura %d", read_len);
+            break;
+        }
+    }
+    ESP_LOGI(TAG, "[REC] Gravação contínua encerrada.");
+    recorder_pipeline_close();
+    rec_task_handle = NULL;
     vTaskDelete(NULL);
 }
 
+// ── Handler de eventos do WebSocket ──
 static void websocket_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
     esp_websocket_event_data_t *data = (esp_websocket_event_data_t *)event_data;
-    
+
     if (event_id == WEBSOCKET_EVENT_CONNECTED) {
-        ESP_LOGI(TAG, "[WS] Conectado ao servidor Render!");
+        ESP_LOGI(TAG, "[WS] Conectado ao servidor!");
     } else if (event_id == WEBSOCKET_EVENT_ERROR) {
-        ESP_LOGE(TAG, "[WS] Erro na conexão WebSocket.");
+        ESP_LOGE(TAG, "[WS] Erro na conexão.");
+    } else if (event_id == WEBSOCKET_EVENT_DISCONNECTED) {
+        ESP_LOGW(TAG, "[WS] Desconectado.");
+        // Volta ao idle se cair durante uma sessão
+        if (g_state == ST_LIVE || g_state == ST_PLAYING_RAW) {
+            g_state = ST_IDLE;
+            player_live_pipeline_close();
+            player_raw_pipeline_close();
+        }
     } else if (event_id == WEBSOCKET_EVENT_DATA) {
-        if (data->op_code == 1 && data->data_len > 0) { // Text Message
+        if (data->op_code == 1 && data->data_len > 0) {  // texto
             char payload[128] = {0};
-            int len = data->data_len < 127 ? data->data_len : 127;
+            int len = data->data_len < (int)sizeof(payload) - 1 ? data->data_len : (int)sizeof(payload) - 1;
             strncpy(payload, data->data_ptr, len);
-            
             ESP_LOGI(TAG, "[SERVER CMD] %s", payload);
-            
-            if (strncmp(payload, "PLAY_RESPONSE:", 14) == 0) {
-                int rate = 24000;
-                sscanf(payload + 14, "%d:", &rate);
-                ESP_LOGI(TAG, "Recebendo áudio (Rate: %d)...", rate);
 
-                stop_recording = true; 
-                is_playing_response = true;
+            // PLAY_LIVE_START:<rate>  -> abre player contínuo + mic contínuo (full-duplex)
+            if (strncmp(payload, "PLAY_LIVE_START:", 16) == 0) {
+                int rate = LIVE_PLAY_RATE;
+                sscanf(payload + 16, "%d", &rate);
+                ESP_LOGI(TAG, "Iniciando modo LIVE (player %dHz + mic 16kHz)", rate);
 
-                if (player) {
-                    audio_pipeline_stop(player);
-                    audio_pipeline_wait_for_stop(player);
-                    audio_pipeline_deinit(player);
-                    player = NULL;
+                // Garante estado limpo de players de .raw
+                player_raw_pipeline_close();
+
+                // Abre player contínuo da IA
+                player_live_pipeline_open(rate);
+
+                // Abre/ garante recorder e dispara a task de gravação contínua
+                recorder_pipeline_open();
+                g_state = ST_LIVE;
+                if (rec_task_handle == NULL) {
+                    xTaskCreate(recorder_task, "rec_live", 8192, NULL, 5, &rec_task_handle);
                 }
-                player_pipeline_open(rate);
-            } else if (strcmp(payload, "PLAY_DONE") == 0) {
-                ESP_LOGI(TAG, "Fim da resposta. Fechando player.");
-                if (player) {
-                    audio_pipeline_stop(player);
-                    audio_pipeline_wait_for_stop(player);
-                    audio_pipeline_deinit(player);
-                    player = NULL;
-                }
-                raw_write = NULL;
-                is_playing_response = false;
             }
-        } 
-        else if (data->op_code == 2 && data->data_len > 0) { // Binary Message
-            if (is_playing_response && raw_write) {
-                raw_stream_write(raw_write, (char *)data->data_ptr, data->data_len);
+            // PLAY_LIVE_END -> para o player contínuo (a IA parou de falar / morador agiu)
+            else if (strcmp(payload, "PLAY_LIVE_END") == 0) {
+                ESP_LOGI(TAG, "Pausando player LIVE para resposta rapida.");
+                player_live_pipeline_close();
+                // Keep ST_LIVE here. PLAY_RESPONSE performs the transition to
+                // ST_PLAYING_RAW; END_SESSION is the terminal state change.
+            }
+            // PLAY_RESPONSE:<rate>:<file> -> toca um .raw (resposta rápida)
+            else if (strncmp(payload, "PLAY_RESPONSE:", 14) == 0) {
+                int rate = 8000;
+                sscanf(payload + 14, "%d:", &rate);
+                ESP_LOGI(TAG, "Tocando .raw de resposta (rate %d)", rate);
+
+                // Pausa o mic: muda estado para a task de gravação parar de enviar
+                if (g_state == ST_LIVE) {
+                    g_state = ST_PLAYING_RAW;
+                }
+                // Fecha o player live para liberar o I2S pro player de .raw
+                player_live_pipeline_close();
+                // Abre o player de .raw no rate informado
+                player_raw_pipeline_open(rate);
+            }
+            // PLAY_DONE -> fim do .raw; se voltamos pro live, reabre; senão idle
+            else if (strcmp(payload, "PLAY_DONE") == 0) {
+                ESP_LOGI(TAG, "Fim do .raw de resposta.");
+                player_raw_pipeline_close();
+                // O servidor encerra a sessão após o .raw, então voltamos ao idle.
+                g_state = ST_IDLE;
+            }
+            // END_SESSION -> servidor encerrou a sessão Gemini
+            else if (strcmp(payload, "END_SESSION") == 0) {
+                ESP_LOGI(TAG, "Servidor encerrou a sessão.");
+                g_state = ST_IDLE;
+                player_live_pipeline_close();
+                player_raw_pipeline_close();
+            }
+        } else if (data->op_code == 2 && data->data_len > 0) {  // binário
+            // Áudio da IA -> player live (em ST_LIVE)
+            if (g_state == ST_LIVE && raw_write_live) {
+                raw_stream_write(raw_write_live, (char *)data->data_ptr, data->data_len);
+            }
+            // Áudio .raw de resposta -> player de .raw (em ST_PLAYING_RAW)
+            else if (g_state == ST_PLAYING_RAW && raw_write_raw) {
+                raw_stream_write(raw_write_raw, (char *)data->data_ptr, data->data_len);
             }
         }
     }
 }
 
+// ── app_main ──
 void app_main(void) {
     esp_log_level_set("*", ESP_LOG_INFO);
     ESP_LOGI(TAG, "==================================================");
-    ESP_LOGI(TAG, "  INTERFONE AI INTERATIVO (SEM VOIP)              ");
+    ESP_LOGI(TAG, "  INTERFONE AI — GEMINI LIVE (FULL-DUPLEX)        ");
     ESP_LOGI(TAG, "==================================================");
 
     ESP_ERROR_CHECK(nvs_flash_init());
 
+    // Codec / placa de áudio
     audio_board_handle_t board_handle = audio_board_init();
     audio_hal_ctrl_codec(board_handle->audio_hal, AUDIO_HAL_CODEC_MODE_BOTH, AUDIO_HAL_CTRL_START);
     audio_hal_set_volume(board_handle->audio_hal, 75);
 
     es8388_config_adc_input(0x50);
-    es8388_write_reg(0x12, 0xBB); // ALC Enable
-    es8388_write_reg(0x13, 0x10); 
-    es8388_write_reg(0x14, 0x32); 
-    es8388_write_reg(0x10, 0x00); 
+    es8388_write_reg(0x12, 0xBB);  // ALC Enable
+    es8388_write_reg(0x13, 0x10);
+    es8388_write_reg(0x14, 0x32);
+    es8388_write_reg(0x10, 0x00);
 
-
+    // Wi-Fi (credenciais no wifi_setup / hardcoded do projeto original)
     wifi_init_sta("Vozona", "26121935");
 
+    // WebSocket cliente (buffer maior pra suportar streaming contínuo)
     esp_websocket_client_config_t ws_cfg = {
         .uri = "wss://interfone.onrender.com/ws/esp32",
         .port = 443,
         .transport = WEBSOCKET_TRANSPORT_OVER_SSL,
-        .buffer_size = 4096,
+        .buffer_size = 8192,
         .keep_alive_enable = true,
         .keep_alive_interval = 10,
     };
@@ -236,66 +365,38 @@ void app_main(void) {
     esp_websocket_register_events(ws_client, WEBSOCKET_EVENT_ANY, websocket_event_handler, (void *)ws_client);
     esp_websocket_client_start(ws_client);
 
+    // GPIOs dos botões de campainha
     gpio_config_t io_conf = {
         .intr_type = GPIO_PIN_INTR_DISABLE,
         .mode = GPIO_MODE_INPUT,
-        .pin_bit_mask = ((1ULL << GPIO_NUM_36) | (1ULL << GPIO_NUM_13) | (1ULL << GPIO_NUM_23) | (1ULL << GPIO_NUM_5) | (1ULL << GPIO_NUM_18)),
+        .pin_bit_mask = ((1ULL << BOTAO_1) | (1ULL << BOTAO_2) | (1ULL << BOTAO_3) | (1ULL << BOTAO_4) | (1ULL << BOTAO_5)),
         .pull_down_en = 0,
         .pull_up_en = 1,
     };
     gpio_config(&io_conf);
 
+    // Loop principal: detecta campainha
+    bool already_triggered = false;
     while (1) {
-        if (gpio_get_level(GPIO_NUM_36) == 0 || gpio_get_level(GPIO_NUM_13) == 0 || gpio_get_level(GPIO_NUM_23) == 0 || gpio_get_level(GPIO_NUM_5) == 0 || gpio_get_level(GPIO_NUM_18) == 0) {
-            
-            ESP_LOGI(TAG, "Campainha pressionada!");
-            
-            // ── PASSO 1: CHAMA O CELULAR IMEDIATAMENTE ──
+        bool bell = (gpio_get_level(BOTAO_1) == 0 || gpio_get_level(BOTAO_2) == 0 ||
+                     gpio_get_level(BOTAO_3) == 0 || gpio_get_level(BOTAO_4) == 0 ||
+                     gpio_get_level(BOTAO_5) == 0);
+
+        // Borda de descida: só dispara uma vez por toque
+        if (bell && !already_triggered && g_state == ST_IDLE) {
+            already_triggered = true;
+            ESP_LOGI(TAG, "🔔 Campainha pressionada! → IA assume imediatamente.");
+
+            // Avisa o servidor para abrir a sessão Gemini Live.
+            // A IA cumprimenta o visitante ("Olá, com quem gostaria de falar?") assim
+            // que a sessão começa — não há saudação local nem gravação intermedária.
             if (esp_websocket_client_is_connected(ws_client)) {
                 esp_websocket_client_send_text(ws_client, "TRIGGER_CALL", 12, portMAX_DELAY);
             }
-
-            // ── PASSO 2: SAUDAÇÃO INICIAL ──
-            ESP_LOGI(TAG, "Falando 'Olá' ao visitante...");
-            player_pipeline_open(TTS_SAMPLE_RATE); 
-            raw_stream_write(raw_write, (char *)ola_start, ola_end - ola_start);
-            
-            // Espera tempo fixo do áudio terminar (3 segundos)
-            vTaskDelay(3000 / portTICK_PERIOD_MS);
-            
-            // Limpa o player antes de começar a gravar
-            audio_pipeline_stop(player);
-            audio_pipeline_deinit(player);
-            player = NULL;
-            raw_write = NULL;
-
-            // ── PASSO 3: GRAVAÇÃO DO VISITANTE (PIPELINE) ──
-            ESP_LOGI(TAG, "Ouvindo o visitante...");
-            stop_recording = false;
-            if (esp_websocket_client_is_connected(ws_client)) {
-                esp_websocket_client_send_text(ws_client, "AUDIO_START", 11, portMAX_DELAY);
-            }
-            // Criamos a tarefa de gravação
-            xTaskCreate(recorder_pipeline_task, "rec_task", 8192, NULL, 5, NULL);
-            
-            // Espera a gravação finalizar (6 segundos)
-            vTaskDelay(6000 / portTICK_PERIOD_MS);
-
-            // ── PASSO 4: SOM DE ESPERA ──
-            ESP_LOGI(TAG, "Pedindo para aguardar...");
-            player_pipeline_open(TTS_SAMPLE_RATE);
-            raw_stream_write(raw_write, (char *)minuto_start, minuto_end - minuto_start);
-            
-            // Espera tempo expansivo (12 segundos) para englobar os beeps contínuos de espera!
-            vTaskDelay(12000 / portTICK_PERIOD_MS);
-            
-            audio_pipeline_stop(player);
-            audio_pipeline_deinit(player);
-            player = NULL;
-            raw_write = NULL;
-
-            ESP_LOGI(TAG, "Sequência finalizada. Tudo pronto.");
+        } else if (!bell) {
+            already_triggered = false;
         }
+
         vTaskDelay(100 / portTICK_PERIOD_MS);
     }
 }
