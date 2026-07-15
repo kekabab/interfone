@@ -286,7 +286,8 @@ class IntercomState:
         self.call_timeout_task: asyncio.Task | None = None
         self.live_session: GeminiLiveSession | None = None  # sessão Gemini ativa
         self.push_subscriptions: list[dict] = self._load_subscriptions()
-        self.response_lock = asyncio.Lock()  # Evita double-send simultâneo
+        self.response_lock = asyncio.Lock()  # Prevent concurrent resident replies
+        self.last_live_error = ""  # Safe Live startup diagnostic
 
     def _load_subscriptions(self) -> list:
         try:
@@ -353,7 +354,8 @@ async def api_status():
         "responses": {k: v["label"] for k, v in QUICK_RESPONSES.items()},
         "debug_keys": [k for k in os.environ.keys() if "KEY" in k or "GEMINI" in k or "PORT" in k or "VAPID" in k],
         "gemini_api_key_len": len(os.environ.get("GEMINI_API_KEY", "")),
-        "esp32_online": state.esp32_ws is not None
+        "esp32_online": state.esp32_ws is not None,
+        "last_live_error": state.last_live_error
     }
 
 @app.get("/api/responses")
@@ -512,6 +514,7 @@ async def esp32_websocket(websocket: WebSocket):
                     state.ring_start_time = time.time()
                     print("[CALL] Starting Gemini Live session.")
                     state.status = "connecting"
+                    state.last_live_error = ""
                     await sio.emit("intercom_status", {"status": "connecting", "message": "Conectando a IA..."})
 
                     if not genai_client:
@@ -536,6 +539,7 @@ async def esp32_websocket(websocket: WebSocket):
                             "Interfone", "Alguem esta no portao. A IA esta atendendo."
                         ))
                     except Exception as e:
+                        state.last_live_error = f"{type(e).__name__}: {e}"
                         print(f"[GEMINI] Failed to start session: {e}")
                         await end_live_session()
                         state.status = "idle"
